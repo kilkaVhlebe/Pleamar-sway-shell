@@ -1,0 +1,13 @@
+# Что стартует вместе с рабочим столом, одна команда на строку (запуск через sh -c):
+# `pleamar --autostart` запускает всё это (в sway: exec pleamar --autostart).
+# Ваши сцены (таскбары, трей, меню) кладите в ~/.config/pleamar/shells/.
+#
+# `pleamar-scene` — обёртка из этого проекта: не запускает вторую копию сцены,
+# если она уже идёт (иначе каждый reload конфига плодил бы дубли).
+# `--no-hud` — без графа кадров: он отнимает у полноэкранных сцен их высоту.
+
+pleamar-scene bar/bar.plm
+pleamar-scene launcher/launcher.plm
+pleamar-scene center/center.plm
+pleamar-scene clipboard/clipboard.plm
+pleamar-scene notes/notes.plm

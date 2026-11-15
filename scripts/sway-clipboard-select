@@ -1,0 +1,12 @@
+#!/bin/sh
+# Put one entry of the cliphist history back into the clipboard.
+set -eu
+
+cliphist_bin="${CLIPHIST:-cliphist}"
+clipboard_id="${1:-}"
+
+case "$clipboard_id" in
+    ''|*[!0-9]*) exit 2 ;;
+esac
+
+"$cliphist_bin" decode "$clipboard_id" | wl-copy

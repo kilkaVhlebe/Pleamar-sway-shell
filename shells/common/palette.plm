@@ -1,0 +1,17 @@
+// The house colors — sway-shell's Theme.qml, carried over. A scene that wants
+// another tone declares it itself, with the same name, after importing.
+
+library Palette {
+    let ink      = #e7eaf0        // what is read (Theme.text)
+    let mint     = #3d8bff        // the accent (Theme.blue)
+    let coal     = #101216        // the desktop behind (Theme.background)
+    let sheet    = #191d24        // bars and panels (Theme.surface)
+    let raised   = #222833        // raised plates (Theme.surfaceRaised)
+    let hover    = #2b3340        // the row under the pointer (Theme.surfaceHover)
+    let edge     = #303744        // borders (Theme.border)
+    let soft     = #8b93a3        // secondary text (Theme.muted)
+    let red      = #e05260        // danger, urgency
+    let redsoft  = #54252d        // danger's ground (Theme.redSoft)
+    let bluesoft = #203b67        // the accent's ground (Theme.blueSoft)
+    let green    = #58c78a        // the good state (Theme.green)
+}

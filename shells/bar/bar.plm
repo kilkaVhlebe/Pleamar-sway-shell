@@ -1,0 +1,204 @@
+// The bar: one pill, per monitor. On the left, the door to the control center
+// and the workspaces; on the right, the tray, the state of the network, the
+// sound, the battery, the keyboard's language, the clock, and the door to the
+// notification centre. bar.luau tells it what the system is doing.
+//
+// The surface is as tall as the monitor —a bar and its panels on one surface,
+// as the documentation puts it—: the tray's menu drops out of the bar and is
+// drawn here. Only what is drawn takes the click; the empty part lets it pass,
+// so the desktop underneath is not covered.
+
+import "../common/palette.plm"
+import "../common/menu.plm"
+
+scene Bar {
+    surface {
+        size: full, full
+        anchor: top
+        reserve: 44            // windows leave the bar its strip
+        level: top
+        screens: each
+        //  The keyboard only while the tray's menu is open: Escape closes it,
+        //  and a press on another window blurs it away.
+        keyboard: exclusive while menu_open
+    }
+
+    //  Listening is not commanding: `audio` knows the volume, `audio.*` moves
+    //  it. The `say:*` ones let the bar's doors wake the other scenes.
+    permissions { services: "workspaces", "workspaces.focus", "clock", "audio", "audio.*", "network", "battery", "tray", "tray.*", "say:center", "say:launcher", "say:clipboard", "say:notes" }
+    permissions { run: "swaymsg" }   // the keyboard's language, from sway
+
+
+    // ── what the logic reports ───────────────────────────────────
+    //  One record per monitor: which of its workspaces is the active one.
+    model mon max 4 { active: number = 1 }
+    repeat i in 1..11 {
+        fact ws.$i.there = false          // does that workspace exist?
+        fact ws.$i.busy  = false          // does it have windows?
+    }
+    //  The clock asks for itself; the logic composes the line the old bar showed.
+    service clock { hour: number; minute: number; day: number; month: number; weekday: number }
+    text clockline = ""
+    text lang      = "--"
+
+    //  The states the system reports; the scene reads them by itself.
+    service network as net { online: bool }
+    service battery { present: bool; percent: number }
+
+    fact volume = 0
+    fact muted  = false
+
+    //  The states the other scenes report back.
+    fact center_open = false
+    fact notes_open  = false
+    fact notes_count = 0
+    event center_state               // (open): from the control center
+    event note_open                  // (open): from the notification centre
+    event note_count                 // (count): from the notification centre
+
+
+    // ── the tray and its menu ────────────────────────────────────
+    //  The logic watches the tray: it maps `status` to a plain `attention`.
+    model tray_icons max 12 { key: text; title: text; attention: bool; icon: image 24, 24 }
+    model rows max 14 {
+        label: text
+        separator: bool
+        enabled: bool = true
+        checked: number = -1              // -1: not a checkbox · 0: empty · 1: checked
+        children: number                  // how many it has inside: leads to another menu
+    }
+    fact menu_open = false
+    fact slot = 0                         // which icon the open menu belongs to
+    fact menu_h = 16                      // the plate's height: 8 above, 8 below
+
+    // ── what the bar asks for ────────────────────────────────────
+    event go ->            // (i): take me to workspace i
+    event open_center ->   // the diamond: wake the control center
+    event open_launcher -> // (kept for symmetry; the key does it itself)
+    event open_clip ->
+    event open_notes ->
+    event volume_step ->   // (notches): the wheel on the sound pill
+    event mute ->
+    event activate ->      // (i): the tray's usual click
+    event menu ->          // (i): its menu, on the right button
+    event choose ->        // (i): a row of that menu has been chosen
+
+
+    // ── the pill ─────────────────────────────────────────────────
+    //  The old bar was one plate, inset 5 and 4, with a 1 px border.
+    box pill_border { from: 5, 4; size: screen.width - 10, 36; corner: 9; color: edge }
+    box pill        { from: 6, 5; size: screen.width - 12, 34; corner: 8; color: sheet }
+
+    // ── a door: 34 × 34, lit while its scene is open ─────────────
+    component Door(open_fact: bool, glyph: text, glyph_color: color, pressed: event) {
+        size: 34, 34
+        prop hot = 0 ~quick
+        prop lit = 0 ~quick
+        follow lit = if(open_fact, 1, 0)
+        box hit { from: 0, 0; size: 34, 34; corner: 8; color: bluesoft
+                  opacity: max(lit, hot); cursor: pointer }
+        text glyph { at: 17, 17; anchor: center; size: 15; color: glyph_color }
+        on enter hit { hot: 1 ~quick }
+        on leave hit { hot: 0 ~quick }
+        on press hit { menu_open = false; emit pressed }
+    }
+
+    // ── one workspace ────────────────────────────────────────────
+    component Desk(i, active: number) {
+        size: 34, 34
+        prop on  = 0 ~lively
+        prop hot = 0 ~quick
+        follow on = if(active == i, 1, 0)
+        box hit { from: 0, 0; size: 34, 34; corner: 8; color: mint
+                  opacity: on * 100% + hot * 30%; cursor: pointer }
+        text "{i}" { at: 17, 17; anchor: center; size: 13; weight: 600; color: mix(ink, coal, on) }
+        //  A dot underneath if it has windows and you are not on it.
+        ellipse { at: 17, 28; radius: 1.8; color: ink; opacity: ws.$i.busy * (1 - on) * 70% }
+        on enter hit { hot: 1 ~quick }
+        on leave hit { hot: 0 ~quick }
+        on press hit { menu_open = false; emit go(i) }
+    }
+
+    // ── one tray icon ────────────────────────────────────────────
+    component TrayIcon(i) {
+        size: 30, 30
+        prop lift = 0 ~quick
+        box hit { from: 0, 0; size: 30, 30; corner: 7; color: hover; opacity: lift * 100%; cursor: pointer }
+        box { from: 0, 0; size: 30, 30; corner: 7; color: redsoft
+              opacity: if(i.attention, 100%, 0%) }
+        image i.icon { at: 3, 3; size: 24, 24 }
+        on enter hit { lift: 1 ~quick }
+        on leave hit { lift: 0 ~quick }
+        on press hit       { emit activate(i.index) }
+        on press right hit { slot = i.index; emit menu(i.index) }
+    }
+
+    // ── on the left ──────────────────────────────────────────────
+    row leftside {
+        at: 15, 5
+        gap: 10
+        align: center
+
+        Door(center_open, "◆", mint, pressed: open_center)
+        row desks ~calm {
+            gap: 3
+            align: center
+            repeat i in 1..11 { Desk(i, mon.$screen.active) { show: ws.$i.there } }
+        }
+        box { size: 1, 24; color: edge }
+    }
+
+    // ── on the right ─────────────────────────────────────────────
+    row rightside {
+        at: screen.width - 15, 5
+        anchor: right
+        gap: 10
+        align: center
+
+        row tray { gap: 3; align: center; show: tray_icons.count > 0
+            for i in tray_icons { TrayIcon(i) } }
+
+        text if(net.online, "●", "○") { size: 13; color: if(net.online, green, soft) }
+
+        row vol { gap: 7; align: center; cursor: pointer
+            text if(muted, "×", "♪") { size: 14; color: if(muted, red, ink) }
+            text "{volume * 100, 0}%" { size: 13; color: soft; show: not muted }
+        }
+
+        text "▣ {battery.percent, 0}%" { size: 13; weight: 600
+            color: if(battery.percent < 20, red, ink); show: battery.present }
+
+        text lang { size: 13.5; weight: 700; color: mint }
+
+        text clockline { size: 13.5; color: ink }
+
+        Door(notes_open, if(notes_count > 0, "●", "○"),
+             if(notes_count > 0, red, soft), pressed: open_notes)
+    }
+
+    // ── the tray's menu ──────────────────────────────────────────
+    //  Under its icon, as tall as its list (the logic keeps `menu_h`). The
+    //  place is an expression, not a `let`: a `let` is worked out before the
+    //  rows are laid out, and would read a width of nought.
+    box menu_edge  { from: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256), 46
+                     size: 248, menu_h; corner: 10; color: edge; show: menu_open }
+    box menu_plate { from: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256) + 1, 47
+                     size: 246, menu_h - 2; corner: 9; color: raised; show: menu_open }
+    column menu_list { at: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256) + 8, 54
+        show: menu_open
+        for r in rows { MenuRow(r, chosen: choose, width: 232) } }
+
+    // ── the rules ────────────────────────────────────────────────
+    on center_state(v) { center_open = v > 0 }
+    on note_open(v)    { notes_open  = v > 0 }
+    on note_count(v)   { notes_count = v }
+
+    on press leftside  { menu_open = false }
+    on press rightside { menu_open = false }
+    on scroll vol      { emit volume_step(wheel) }
+    on press vol       { emit mute }
+
+    //  The tray menu's ways out: Escape, or a press on another window.
+    on key Escape { menu_open = false }
+    on blur       { menu_open = false }
+}

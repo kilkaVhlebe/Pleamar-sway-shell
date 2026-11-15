@@ -1,0 +1,86 @@
+// The notification centre: a panel down the right of the screen, and a toast
+// for the one that has just arrived. The notices stay until somebody decides:
+// the logic tells the server to keep them.
+
+import "../common/palette.plm"
+
+scene Notes {
+    surface {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        open: true
+        screens: each
+        keyboard: exclusive while open
+    }
+
+    permissions { services: "notifications", "notifications.*", "say:bar", "say:center" }
+
+
+    // ── the boundary ─────────────────────────────────────────────
+    model notes max 30 { id: number; app: text; title: text; body: text; has_body: bool; urgent: bool }
+    fact open = false
+    fact note_count = 0
+
+    //  The toast of the one that has just come.
+    fact toast_show = false
+    fact toast_urgent = false
+    fact toast_has_body = false
+    text toast_app = ""
+    text toast_title = ""
+    text toast_body = ""
+
+    event toggle                          // from the bar's door
+    event dismiss ->                      // (i): that one goes
+    event clear ->                        // all of them go
+
+
+    // ── the toast: 360 × 116, under the bar ──────────────────────
+    box toast_edge { from: screen.width - 377, 51; size: 362, 118; corner: 10
+                     color: if(toast_urgent, red, mint); show: toast_show }
+    box toast_fill { from: screen.width - 376, 52; size: 360, 116; corner: 9
+                     color: raised; show: toast_show }
+    text toast_app { at: screen.width - 362, 68; anchor: left center; size: 11; weight: 700
+                     width: 332; lines: 1; color: mint; show: toast_show }
+    text toast_title { at: screen.width - 362, 90; anchor: left center; size: 13; weight: 700
+                       width: 332; lines: 2; color: ink; show: toast_show }
+    text toast_body { at: screen.width - 362, 118; anchor: left center; size: 11
+                      width: 332; lines: 2; color: soft; show: toast_show and toast_has_body }
+
+    // ── the panel: 400 wide, down the right ──────────────────────
+    box panel_edge { from: screen.width - 413, 51; size: 402, screen.height - 64; corner: 13; color: edge; show: open }
+    box panel_fill { from: screen.width - 412, 52; size: 400, screen.height - 66; corner: 12; color: coal; show: open }
+
+    text "Уведомления" { at: screen.width - 396, 74; anchor: left center; size: 19; weight: 700; color: ink; show: open }
+    box clear_hit { from: screen.width - 103, 60; size: 75, 28; corner: 6; color: raised; cursor: pointer; show: open }
+    text "Очистить" { at: screen.width - 66, 74; anchor: center; size: 11; color: soft; show: open }
+
+    column notelist { at: screen.width - 396, 104; view: 368, screen.height - 164; gap: 8; show: open
+        for n in notes { Card(n) }
+    }
+    text "Новых уведомлений нет" { at: screen.width - 212, 300; anchor: center; size: 12; color: soft
+        show: open and notes.count == 0 }
+
+    // ── one notice ───────────────────────────────────────────────
+    component Card(n: record) {
+        size: 368, 96
+        prop hot = 0 ~quick
+        box { from: 0, 0; size: 368, 96; corner: 10; color: sheet }
+        box { from: 0, 0; size: 3, 96; corner: 1.5; color: if(n.urgent, red, mint) }
+        text n.app { at: 14, 16; anchor: left center; size: 11; weight: 700; width: 300; lines: 1; color: mint }
+        text n.title { at: 14, 38; anchor: left center; size: 13; weight: 700; width: 330; lines: 1; color: ink }
+        text n.body { at: 14, 62; anchor: left center; size: 11; width: 330; lines: 2; color: soft; show: n.has_body }
+
+        //  ×
+        box close { from: 334, 4; size: 26, 26; corner: 6; color: hover; opacity: hot; cursor: pointer }
+        text "×" { at: 347, 17; anchor: center; size: 17; color: soft }
+        on enter close { hot: 1 ~quick }
+        on leave close { hot: 0 ~quick }
+        on press close { emit dismiss(n.index) }
+    }
+
+    // ── the rules ────────────────────────────────────────────────
+    on toggle     { toggle open }
+    on key Escape { open = false }
+    on press clear_hit { emit clear }
+}

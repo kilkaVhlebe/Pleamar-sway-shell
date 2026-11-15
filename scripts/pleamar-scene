@@ -1,0 +1,19 @@
+#!/bin/sh
+# Start one scene unless that same scene is already running.
+#
+#   pleamar-scene bar/bar.plm
+#
+# `exec pleamar --autostart` in the sway config runs again on every reload;
+# without this guard each reload would start a second copy of all five scenes
+# and the two would fight for the same socket.
+set -eu
+
+scene="${1:?usage: pleamar-scene <scene file, relative to ~/.config/pleamar/shells>}"
+
+for pid in $(pgrep -x pleamar 2>/dev/null || true); do
+    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$scene"; then
+        exit 0
+    fi
+done
+
+exec pleamar --scene "${XDG_CONFIG_HOME:-$HOME/.config}/pleamar/shells/$scene" --no-hud

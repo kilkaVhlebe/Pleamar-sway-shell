@@ -1,0 +1,12 @@
+#!/bin/sh
+# Empty the clipboard history and its previews.
+set -eu
+
+cliphist_bin="${CLIPHIST:-cliphist}"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/pleamar/clipboard-previews"
+
+"$cliphist_bin" wipe
+
+if [ -d "$cache_dir" ]; then
+    find "$cache_dir" -type f -name '*.png' -delete
+fi

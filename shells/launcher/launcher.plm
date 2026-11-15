@@ -1,0 +1,91 @@
+// The launcher: a field to type in, a list that filters as you type, and a
+// dimmed desktop behind. It opens from a sway binding —`pleamar --say launcher
+// "emit toggle"`— and closes with Escape, on launching something, or on
+// pressing the dimmed part.
+
+import "../common/palette.plm"
+
+scene Launcher {
+    surface {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        open: open
+        screens: each
+        //  The keyboard, whole, but only while it is open: closed it does not exist.
+        keyboard: exclusive while open
+    }
+
+    //  What `launcher.luau` may touch: knowing which applications there are,
+    //  launching one of them, opening kitty for the terminal ones, and telling
+    //  the control center to stand down.
+    permissions { services: "apps", "apps.launch", "say:center" }
+    permissions { run: "kitty" }
+
+
+    // ── the boundary ─────────────────────────────────────────────
+    fact open = false
+    fact sel  = 0                          // which one is chosen
+    text query = ""
+    model hits max 7 { name: text; sub: text; has_sub: bool; icon: image 24, 24 }
+    event toggle                           // comes from outside
+    event launch ->                        // (i): launch that hit
+
+
+    // ── the desktop, dimmed ──────────────────────────────────────
+    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% }
+
+    // ── the panel, in the middle: 620 × 480 ──────────────────────
+    box panel_edge { from: (screen.width - 620) / 2 - 1, (screen.height - 480) / 2 - 1
+                     size: 622, 482; corner: 13; color: edge }
+    box panel_fill { from: (screen.width - 620) / 2, (screen.height - 480) / 2
+                     size: 620, 480; corner: 12; color: coal }
+    //  (What the panel draws lies over the dim, so a press on it is its own.)
+
+    // ── the field ────────────────────────────────────────────────
+    box field_plate { from: (screen.width - 620) / 2 + 16, (screen.height - 480) / 2 + 16
+                      size: 588, 44; corner: 8; color: raised }
+    input query { at: (screen.width - 620) / 2 + 30, (screen.height - 480) / 2 + 30
+                  width: 560; size: 14; color: ink; placeholder: "Поиск приложений…"
+                  selection: bluesoft }
+
+    // ── the results ──────────────────────────────────────────────
+    column results { at: (screen.width - 620) / 2 + 16, (screen.height - 480) / 2 + 70; gap: 3
+        for h in hits { Hit(h) }
+    }
+    text "Ничего не найдено" { at: screen.width / 2, (screen.height - 480) / 2 + 260; anchor: center
+        size: 13; color: soft; show: hits.count == 0 }
+
+    //  The keys, under the list.
+    text "↑↓ выбор   Enter запуск   Esc закрыть" { at: screen.width / 2, (screen.height - 480) / 2 + 458; anchor: center
+        size: 10; color: soft }
+
+    // ── one hit: 588 × 48 ────────────────────────────────────────
+    component Hit(h: record) {
+        size: 588, 48
+        prop hot = 0 ~quick
+        prop on  = 0 ~quick
+        follow on = if(sel == h.index, 1, 0)
+
+        box { from: 0, 0; size: 588, 48; corner: 7; color: hover; opacity: hot }
+        box { from: 0, 0; size: 588, 48; corner: 7; color: bluesoft; opacity: on }
+        box hit { from: 0, 0; size: 588, 48; corner: 7; color: ink; opacity: 0; cursor: pointer }
+        image h.icon { at: 12, 10; size: 28, 28 }
+        text h.name { at: 50, 16; anchor: left center; size: 13; width: 520; lines: 1; color: ink }
+        text h.sub { at: 50, 34; anchor: left center; size: 10; width: 520; lines: 1; color: soft; show: h.has_sub }
+
+        on enter hit { hot: 1 ~quick; sel = h.index }
+        on leave hit { hot: 0 ~quick }
+        on press hit { sel = h.index; emit launch(h.index) }
+    }
+
+    // ── the rules ────────────────────────────────────────────────
+    on toggle      { toggle open; focus query }
+    on key Escape  { open = false }
+    on key Down    { sel = min(sel + 1, max(hits.count - 1, 0)) }
+    on key Up      { sel = max(sel - 1, 0) }
+    on submit query { emit launch(sel) }
+
+    //  A press on the dimmed part closes it.
+    on press dim { open = false }
+}

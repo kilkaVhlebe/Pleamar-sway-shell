@@ -1,0 +1,123 @@
+// The clipboard's history: what `cliphist` has kept, with the pictures seen as
+// pictures. It opens from a sway binding —`pleamar --say clipboard "emit
+// toggle"`— and closes on Escape, on a pick, or on a press on the dimmed part.
+
+import "../common/palette.plm"
+
+scene Clipboard {
+    surface {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        open: open
+        screens: each
+        keyboard: exclusive while open
+    }
+
+    permissions { services: "say:center" }
+    permissions { run: "cliphist", "sway-clipboard-select", "sway-clipboard-clear", "sway-clipboard-preview", "wl-paste" }
+
+
+    // ── the boundary ─────────────────────────────────────────────
+    model clips max 50 {
+        id: number
+        title: text
+        note: text
+        has_note: bool
+        is_image: bool
+        is_binary: bool
+        glyph: text
+        glyph_show: bool
+        thumb: image 72, 56
+    }
+    fact open = false
+    fact sel = 0
+    fact confirm = false                  // the clear button, armed
+    text query = ""
+    text count_text = "История пуста"
+
+    event toggle
+    event pick ->                         // (i): that one goes to the clipboard
+    event clear_req ->                    // the clear button
+
+
+    // ── the desktop, dimmed ──────────────────────────────────────
+    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% }
+
+    // ── the panel: 640 × 520, in the middle ──────────────────────
+    box panel_edge { from: (screen.width - 640) / 2 - 1, (screen.height - 520) / 2 - 1
+                     size: 642, 522; corner: 13; color: edge }
+    box panel_fill { from: (screen.width - 640) / 2, (screen.height - 520) / 2
+                     size: 640, 520; corner: 12; color: coal }
+
+    // ── the head ─────────────────────────────────────────────────
+    box head_tile { from: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 16
+                    size: 34, 34; corner: 8; color: bluesoft }
+    text "▣" { at: (screen.width - 640) / 2 + 33, (screen.height - 520) / 2 + 33; anchor: center; size: 18; weight: 700; color: mint }
+    text "История буфера обмена" { at: (screen.width - 640) / 2 + 62, (screen.height - 520) / 2 + 26; anchor: left center; size: 18; weight: 700; color: ink }
+    text count_text { at: (screen.width - 640) / 2 + 62, (screen.height - 520) / 2 + 44; anchor: left center; size: 10; color: soft }
+
+    box clear_bg { from: screen.width / 2 + 320 - 16 - (82 + confirm * 30), (screen.height - 520) / 2 + 16
+                   size: 82 + confirm * 30, 32; corner: 7; color: mix(raised, redsoft, confirm); cursor: pointer }
+    text if(confirm, "Подтвердить", "Очистить") { at: screen.width / 2 + 320 - 16 - (82 + confirm * 30) / 2, (screen.height - 520) / 2 + 32
+        anchor: center; size: 11; color: if(confirm, red, soft) }
+
+    // ── the search ───────────────────────────────────────────────
+    box field_plate { from: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 64
+                      size: 608, 44; corner: 8; color: raised }
+    input query { at: (screen.width - 640) / 2 + 30, (screen.height - 520) / 2 + 78
+                  width: 580; size: 14; color: ink; placeholder: "Поиск в истории…"; selection: bluesoft }
+
+    // ── the history ──────────────────────────────────────────────
+    column history { at: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 120
+        view: 608, 352; gap: 4
+        for c in clips { Card(c) }
+    }
+    text "История пока пуста" { at: screen.width / 2, (screen.height - 520) / 2 + 280; anchor: center
+        size: 13; color: soft; show: clips.count == 0 }
+
+    text "↑↓ выбор   Enter скопировать   Esc закрыть" { at: screen.width / 2, (screen.height - 520) / 2 + 502; anchor: center
+        size: 10; color: soft }
+
+    // ── one entry ────────────────────────────────────────────────
+    component Card(c: record) {
+        size: 608, 58 + c.is_image * 18
+        prop hot = 0 ~quick
+        prop on  = 0 ~quick
+        follow on = if(sel == c.index, 1, 0)
+
+        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: hover; opacity: hot }
+        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: bluesoft; opacity: on }
+        box hit { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: ink; opacity: 0; cursor: pointer }
+
+        //  the tile: 34 × 34 for text, 72 × 56 for a picture
+        box { from: 12, 12; size: 34 + c.is_image * 38, 34 + c.is_image * 22; corner: 8
+              color: if(c.is_binary, redsoft, raised) }
+        image c.thumb { at: 13, 11; size: 68, 52; show: c.is_image }
+        text c.glyph { at: 29 + c.is_image * 19, 29 + c.is_image * 11; anchor: center; size: 15; weight: 700
+                       color: if(c.is_binary, red, mint); show: c.glyph_show }
+        text c.title { at: 57 + c.is_image * 38, 16 + c.is_image * 10; anchor: left center; size: 12
+                       width: 480 - c.is_image * 38; lines: 2; color: ink }
+        text c.note { at: 57 + c.is_image * 38, 36 + c.is_image * 10; anchor: left center; size: 9
+                      width: 480; lines: 1; color: soft; show: c.has_note }
+
+        on enter hit { hot: 1 ~quick; sel = c.index }
+        on leave hit { hot: 0 ~quick }
+        on press hit { sel = c.index; emit pick(c.index) }
+    }
+
+    // ── the rules ────────────────────────────────────────────────
+    on toggle     { toggle open; focus query }
+    on key Escape { open = false }
+    on key Down   { sel = min(sel + 1, max(clips.count - 1, 0)) }
+    on key Up     { sel = max(sel - 1, 0) }
+    on submit query { emit pick(sel) }
+    on press clear_bg { emit clear_req }
+
+    //  A press on the dimmed part closes it — not one on the panel.
+    on press dim {
+        open = if(local.x < (screen.width - 640) / 2 or local.x > (screen.width + 640) / 2
+                  or local.y < (screen.height - 520) / 2 or local.y > (screen.height + 520) / 2,
+                  false, open)
+    }
+}

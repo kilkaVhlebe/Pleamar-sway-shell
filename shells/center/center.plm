@@ -1,0 +1,245 @@
+// The control center: a panel at the top right, over a dimmed desktop. The
+// network, the bluetooth, the sound, the notices and the power. It opens from
+// the diamond in the bar —`pleamar --say center "emit toggle"`— and closes on
+// Escape, on ×, or on a press on the dimmed part.
+
+import "../common/palette.plm"
+
+scene Center {
+    surface {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        open: open
+        screens: each
+        keyboard: exclusive while open
+    }
+
+    permissions { services: "network", "network.*", "bluetooth", "bluetooth.*", "audio", "audio.*", "session.*", "say:bar", "say:notes" }
+
+
+    // ── the boundary: what the system says ───────────────────────
+    service network as net { online: bool; kind: wired | wifi | none; wifi: bool; strength: number; error: password | timeout | unsupported | busy | failed | none }
+    service bluetooth as bt {
+        present: bool
+        powered: bool
+        discovering: bool
+        pairing: pin | passkey | confirm | display | authorize | none
+        pairing_id: number
+        pairing_code: text
+        pairing_name: text
+    }
+
+    model wifi_nets max 12 { ssid: text; note: text; active: number; secure: bool; known: bool }
+    model bt_devs max 12 { name: text; sub: text; address: text; connected: number; icon: image 20, 20 }
+
+    fact volume = 0
+    fact muted  = false
+    fact note_count = 0
+    event note_count ->                   // (count): from the notification centre
+
+    fact open = false
+    fact suppress = false                 // the release of Super after Super+D
+    fact pwd_open = false
+    fact pwd_error = false
+    text pwd_name = ""
+    text pwd_value = ""
+    text pair_code = ""
+    fact ask = 0                          // 0: nothing · 1: power off · 2: restart
+
+    event toggle                          // from the bar, or from the key
+    event suppress ->                     // from the launcher
+    event connect_net ->                  // (i): join that network
+    event pwd_submit ->                   // the password has been typed
+    event wifi_toggle ->
+    event bt_toggle ->
+    event bt_scan ->
+    event bt_tap ->                       // (i): connect or disconnect
+    event pair_answer ->                  // a code has been typed
+    event pair_accept ->
+    event pair_reject ->
+    event volume_set ->                   // (0..1.5)
+    event mute ->
+    event ask_power ->                    // (1: off · 2: restart)
+    event do_power ->                     // confirmed
+    event cancel_power ->
+    event suspend ->
+    event open_notes ->
+
+
+    // ── the desktop, dimmed just a little ────────────────────────
+    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 20% }
+
+    // ── the panel: 380 × 600, at the top right ───────────────────
+    box panel_edge { from: screen.width - 388, 49; size: 382, 602; corner: 13; color: edge }
+    box panel_fill { from: screen.width - 387, 50; size: 380, 600; corner: 12; color: coal }
+
+    text "Центр управления" { at: screen.width - 371, 66; anchor: left center; size: 19; weight: 700; color: ink }
+
+    //  ×
+    box close_hit { from: screen.width - 72, 62; size: 28, 28; corner: 6; color: hover; opacity: 0; cursor: pointer }
+    text "×" { at: screen.width - 58, 75; anchor: center; size: 20; color: soft }
+
+    // ── Wi-Fi ────────────────────────────────────────────────────
+    text "Wi-Fi" { at: screen.width - 371, 108; anchor: left center; size: 13; weight: 700; color: mint }
+    Switch(net.wifi, pressed: wifi_toggle) { move: screen.width - 63, 97 }
+
+    column wifilist { at: screen.width - 371, 126; view: 348, 158; gap: 2
+        for n in wifi_nets { NetRow(n) }
+    }
+    text "Сети не найдены" { at: screen.width - 355, 134; size: 12; color: soft; show: wifi_nets.count == 0 }
+    text "Wi-Fi выключен" { at: screen.width - 355, 134; size: 12; color: soft; show: net.online == false and net.wifi == false }
+
+    // ── Bluetooth ────────────────────────────────────────────────
+    text "Bluetooth" { at: screen.width - 371, 302; anchor: left center; size: 13; weight: 700; color: mint }
+    Switch(bt.powered, pressed: bt_toggle) { move: screen.width - 63, 291 }
+    text "Поиск" { at: screen.width - 130, 302; anchor: left center; size: 11; color: soft; show: bt.powered }
+    box scan_hit { from: screen.width - 136, 291; size: 60, 22; corner: 6; color: hover; opacity: 0; cursor: pointer; show: bt.powered }
+    text "поиск…" { at: screen.width - 106, 302; anchor: center; size: 10; color: mint; show: bt.discovering }
+
+    column btlist { at: screen.width - 371, 320; view: 348, 116; gap: 2
+        for d in bt_devs { BtRow(d) }
+    }
+    text "Устройств нет" { at: screen.width - 355, 328; size: 12; color: soft; show: bt_devs.count == 0 }
+
+    // ── the sound ────────────────────────────────────────────────
+    box { from: screen.width - 371, 448; size: 348, 1; color: edge }
+    text if(muted, "Звук выключен", "Громкость") { at: screen.width - 371, 464; anchor: left center; size: 12; color: ink }
+    text "{volume * 100, 0}%" { at: screen.width - 23, 464; anchor: right center; size: 11; color: soft; width: 60; align: right }
+
+    box mute_hit { from: screen.width - 371, 477; size: 34, 30; corner: 6; color: hover; opacity: 0; cursor: pointer }
+    text if(muted, "×", "♪") { at: screen.width - 354, 492; anchor: center; size: 15; color: if(muted, red, mint) }
+
+    //  The slide: 220 wide, 0..1.5 like the old one.
+    box track_bg { from: screen.width - 329, 490; size: 220, 4; corner: 2; color: #343737 }
+    box track_fill { from: screen.width - 329, 490; size: volume * 220, 4; corner: 2; color: mint }
+    zone box track { from: screen.width - 331, 482; size: 224, 20; cursor: pointer }
+
+    // ── the notices ──────────────────────────────────────────────
+    box notes_hit { from: screen.width - 371, 522; size: 348, 38; corner: 7; color: raised; cursor: pointer }
+    text "Уведомления  ·  {note_count}" { at: screen.width - 197, 541; anchor: center; size: 12; color: ink }
+
+    // ── the power ────────────────────────────────────────────────
+    box off_hit { from: screen.width - 371, 570; size: 112, 38; corner: 7; color: redsoft; cursor: pointer }
+    text "⏻" { at: screen.width - 315, 589; anchor: center; size: 18; color: red }
+    box reboot_hit { from: screen.width - 253, 570; size: 112, 38; corner: 7; color: bluesoft; cursor: pointer }
+    text "↻" { at: screen.width - 197, 589; anchor: center; size: 18; color: mint }
+    box suspend_hit { from: screen.width - 135, 570; size: 112, 38; corner: 7; color: raised; cursor: pointer }
+    text "☾" { at: screen.width - 79, 589; anchor: center; size: 18; color: ink }
+
+    // ── the password, asked of whoever sits there ────────────────
+    box pwd_edge { from: screen.width - 371, 249; size: 350, 182; corner: 11; color: mint; show: pwd_open }
+    box pwd_fill { from: screen.width - 370, 250; size: 348, 180; corner: 10; color: raised; show: pwd_open }
+    text "Пароль Wi-Fi" { at: screen.width - 356, 270; anchor: left center; size: 14; weight: 700; color: ink; show: pwd_open }
+    text pwd_name { at: screen.width - 356, 292; anchor: left center; size: 12; color: soft; show: pwd_open }
+    box field_bg { from: screen.width - 356, 306; size: 320, 34; corner: 7; color: coal; show: pwd_open }
+    input pwd_value { at: screen.width - 344, 316; width: 296; size: 14; color: ink; secret: true; placeholder: "не короче 8 знаков"; selection: bluesoft; show: pwd_open }
+    text "Не удалось подключиться — проверьте пароль" { at: screen.width - 356, 352; anchor: left center; size: 11; color: red; show: pwd_error }
+    box pwd_cancel { from: screen.width - 356, 388; size: 100, 30; corner: 6; color: sheet; cursor: pointer; show: pwd_open }
+    text "Отмена" { at: screen.width - 306, 403; anchor: center; size: 12; color: ink; show: pwd_open }
+    box pwd_ok { from: screen.width - 143, 388; size: 107, 30; corner: 6; color: mint; cursor: pointer; show: pwd_open }
+    text "Подключить" { at: screen.width - 89, 403; anchor: center; size: 12; color: coal; show: pwd_open }
+
+    // ── bluetooth pairing, as BlueZ asks ─────────────────────────
+    box pair_edge { from: screen.width - 371, 229; size: 350, 222; corner: 11; color: mint; show: bt.pairing != none }
+    box pair_fill { from: screen.width - 370, 230; size: 348, 220; corner: 10; color: raised; show: bt.pairing != none }
+    text "Сопряжение" { at: screen.width - 356, 250; anchor: left center; size: 14; weight: 700; color: ink; show: bt.pairing != none }
+    text bt.pairing_name { at: screen.width - 356, 272; anchor: left center; size: 12; color: soft; show: bt.pairing != none }
+    text "Введите PIN с устройства" { at: screen.width - 356, 296; anchor: left center; size: 11.5; color: soft; show: bt.pairing == pin }
+    text "Введите код с устройства" { at: screen.width - 356, 296; anchor: left center; size: 11.5; color: soft; show: bt.pairing == passkey }
+    text "Этот код введите на устройстве" { at: screen.width - 356, 296; anchor: left center; size: 11.5; color: soft; show: bt.pairing == display }
+    text "Совпадает ли код?" { at: screen.width - 356, 296; anchor: left center; size: 11.5; color: soft; show: bt.pairing == confirm }
+    text "Разрешить сопряжение?" { at: screen.width - 356, 296; anchor: left center; size: 11.5; color: soft; show: bt.pairing == authorize }
+    text bt.pairing_code { at: screen.width - 197, 330; anchor: center; size: 22; weight: 700; color: mint; show: bt.pairing != none }
+    box pair_field { from: screen.width - 356, 306; size: 240, 34; corner: 7; color: coal; show: bt.pairing == pin or bt.pairing == passkey }
+    input pair_code { at: screen.width - 344, 316; width: 216; size: 14; color: ink; placeholder: "код"; selection: bluesoft; show: bt.pairing == pin or bt.pairing == passkey }
+    box pair_no { from: screen.width - 356, 388; size: 120, 30; corner: 6; color: sheet; cursor: pointer; show: bt.pairing != none }
+    text "Отмена" { at: screen.width - 296, 403; anchor: center; size: 12; color: ink; show: bt.pairing != none }
+    box pair_yes { from: screen.width - 143, 388; size: 107, 30; corner: 6; color: mint; cursor: pointer; show: bt.pairing != none }
+    text "Ответить" { at: screen.width - 89, 403; anchor: center; size: 12; color: coal; show: bt.pairing != none }
+
+    // ── the power, confirmed ─────────────────────────────────────
+    box ask_edge { from: screen.width - 355, 278; size: 318, 144; corner: 11; color: red; show: ask != 0 }
+    box ask_fill { from: screen.width - 354, 279; size: 316, 142; corner: 10; color: raised; show: ask != 0 }
+    text if(ask == 1, "Выключить компьютер?", "Перезагрузить компьютер?") { at: screen.width - 338, 300; anchor: left center; size: 14; weight: 700; color: ink; show: ask != 0 }
+    text "Действие нельзя отменить после подтверждения." { at: screen.width - 338, 326; anchor: left center; size: 11; color: soft; show: ask != 0 }
+    box ask_cancel { from: screen.width - 222, 372; size: 84, 30; corner: 6; color: sheet; cursor: pointer; show: ask != 0 }
+    text "Отмена" { at: screen.width - 180, 387; anchor: center; size: 12; color: ink; show: ask != 0 }
+    box ask_ok { from: screen.width - 130, 372; size: 100, 30; corner: 6; color: red; cursor: pointer; show: ask != 0 }
+    text "Подтвердить" { at: screen.width - 80, 387; anchor: center; size: 12; color: ink; show: ask != 0 }
+
+
+    // ── one switch ───────────────────────────────────────────────
+    component Switch(on: bool, pressed: event) {
+        size: 40, 22
+        prop hot = 0 ~quick
+        box hit { from: 0, 0; size: 40, 22; corner: 11; color: mix(hover, mint, on); cursor: pointer }
+        ellipse { at: 11 + on * 18, 11; radius: 8; color: ink }
+        on enter hit { hot: 1 ~quick }
+        on leave hit { hot: 0 ~quick }
+        on press hit { emit pressed }
+    }
+
+    // ── one network ──────────────────────────────────────────────
+    component NetRow(n: record) {
+        size: 348, 32
+        prop hot = 0 ~quick
+        box hit { from: 0, 0; size: 348, 32; corner: 6; color: hover; opacity: hot; cursor: pointer }
+        ellipse { at: 10, 16; radius: 3.5; color: mint; opacity: n.active }
+        text n.ssid { at: 22, 16; anchor: left center; size: 12; width: 240; lines: 1; color: ink }
+        text n.note { at: 340, 16; anchor: right center; size: 10; color: soft }
+        on enter hit { hot: 1 ~quick }
+        on leave hit { hot: 0 ~quick }
+        on press hit { emit connect_net(n.index) }
+    }
+
+    // ── one bluetooth device ─────────────────────────────────────
+    component BtRow(d: record) {
+        size: 348, 32
+        prop hot = 0 ~quick
+        box hit { from: 0, 0; size: 348, 32; corner: 6; color: hover; opacity: hot; cursor: pointer }
+        image d.icon { at: 4, 6; size: 20, 20 }
+        text d.name { at: 30, 13; anchor: left center; size: 12; width: 200; lines: 1; color: ink }
+        text d.sub { at: 340, 13; anchor: right center; size: 10; color: soft }
+        text d.sub { at: 30, 27; anchor: left center; size: 9; color: soft; show: d.connected }
+        on enter hit { hot: 1 ~quick }
+        on leave hit { hot: 0 ~quick }
+        on press hit { emit bt_tap(d.index) }
+    }
+
+    // ── the rules ────────────────────────────────────────────────
+    on toggle      { open = if(suppress, open, not open) }
+    on key Escape  { pwd_open = false; ask = 0; open = false }
+    //  Every zone under the pointer hears the press, so the rule itself tells
+    //  the panel's rectangle (local is in the surface's own coordinates).
+    on press dim {
+        open = if(local.x < screen.width - 387 or local.x > screen.width - 7
+                  or local.y < 49 or local.y > 651, false, open)
+        pwd_open = if(local.x < screen.width - 371 or local.x > screen.width - 21
+                       or local.y < 249 or local.y > 431, false, pwd_open)
+        ask = if(local.x < screen.width - 355 or local.x > screen.width - 37
+                 or local.y < 278 or local.y > 422, 0, ask)
+    }
+    on press close_hit  { open = false }
+    on press mute_hit   { emit mute }
+    on press notes_hit  { emit open_notes }
+    on press off_hit    { emit ask_power(1) }
+    on press reboot_hit { emit ask_power(2) }
+    on press suspend_hit { emit suspend }
+    on press ask_cancel { ask = 0 }
+    on press ask_ok     { emit do_power }
+    on press pwd_cancel { pwd_open = false }
+    on press pwd_ok     { emit pwd_submit }
+    on press pair_no    { emit pair_reject }
+    on press pair_yes   { emit pair_accept }
+    on press scan_hit   { emit bt_scan }
+    on press track      { emit volume_set(clamp((local.x - screen.width + 331) / 220, 0, 1)) }
+    on drag track       { emit volume_set(clamp((local.x - screen.width + 331) / 220, 0, 1)) }
+    on submit pwd_value { emit pwd_submit }
+    on submit pair_code { emit pair_answer }
+
+    //  The field is kept ready while its dialog is up.
+    every 250ms while pwd_open { focus pwd_value }
+    every 250ms while bt.pairing == pin { focus pair_code }
+    every 250ms while bt.pairing == passkey { focus pair_code }
+}
