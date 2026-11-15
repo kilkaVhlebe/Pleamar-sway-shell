@@ -33,54 +33,159 @@ scene Notes {
     event toggle                          // from the bar's door
     event dismiss ->                      // (i): that one goes
     event clear ->                        // all of them go
+    event dismiss_toast ->                // a press on the toast
+    event toast_new                       // (urgent): from the logic, a new toast is up
 
+
+    // ── how things come and go ───────────────────────────────────
+    //  The surface is always open (it carries the toast), so what is not on
+    //  show is at opacity 0 — and a group at 0 has no zones: the desktop
+    //  under it stays pressable.
+    prop tin = 0 ~260ms                   // the toast: slides in from the right
+    layer toaster ~quick {
+        toast_on while toast_show { tin: 1 ~260ms }
+        toast_off                 { tin: 0 ~180ms }
+    }
+    prop pin = 0 ~240ms                   // the panel: the same, a little wider
+    layer drawer ~quick {
+        drawer_on while open { pin: 1 ~240ms }
+        drawer_off           { pin: 0 ~170ms }
+    }
+
+    //  The time the toast has left, 1 → 0 at an even pace, as long as the
+    //  logic's timer (5 s, 9 s for an urgent one). A pose, so a gesture can
+    //  run it linearly; the logic never sets it frame by frame.
+    pose ttl = 0
+    gesture ttl_short asked {
+        160ms out_quad { ttl: 1 }
+        4840ms linear  { ttl: 0 }
+    }
+    gesture ttl_long asked {
+        160ms out_quad { ttl: 1 }
+        8840ms linear  { ttl: 0 }
+    }
+
+
+    //  Not painted, there only while the panel is open: a press beside the
+    //  panel closes it (the empty surface would let the press through).
+    //  Declared first, so everything after it is on top.
+    zone box dim { from: 0, 0; size: screen.width, screen.height; show: open }
 
     // ── the toast: 360 × 116, under the bar ──────────────────────
-    box toast_edge { from: screen.width - 377, 51; size: 362, 118; corner: 10
-                     color: if(toast_urgent, red, mint); show: toast_show }
-    box toast_fill { from: screen.width - 376, 52; size: 360, 116; corner: 9
-                     color: raised; show: toast_show }
-    text toast_app { at: screen.width - 362, 68; anchor: left center; size: 11; weight: 700
-                     width: 332; lines: 1; color: mint; show: toast_show }
-    text toast_title { at: screen.width - 362, 90; anchor: left center; size: 13; weight: 700
-                       width: 332; lines: 2; color: ink; show: toast_show }
-    text toast_body { at: screen.width - 362, 118; anchor: left center; size: 11
-                      width: 332; lines: 2; color: soft; show: toast_show and toast_has_body }
+    group {
+        move: screen.width - 376 + 28 * (1 - tin), 52
+        opacity: tin
+
+        body {
+            color: mix(mix(panel, redsoft, toast_urgent * 0.25), sheet, toast_fill.hover)
+            rim: 5%; light: 3%, 0, 80
+            border: 1, mix(edge, red, toast_urgent * 0.75)
+            shadow: 0, 12, 32, 30%
+            box { from: 0, 0; size: 360, 116; corner: 14 }
+        }
+        //  how urgent: the bar at the left edge
+        box { from: 6, 18; size: 3, 80; corner: 1.5; color: if(toast_urgent, red, mint) }
+
+        ellipse { at: 22, 22; radius: 3; color: if(toast_urgent, red, mint) }
+        text toast_app { at: 31, 22; anchor: left center; size: 11; weight: 700
+                         width: 290; lines: 1; color: soft }
+        text "×" { at: 341, 21; anchor: center; size: 16; color: soft; opacity: toast_fill.hover }
+        text toast_title { at: 18, 34; anchor: left top; size: 13; weight: 700
+                           width: 324; lines: if(toast_has_body, 1, 2); color: ink }
+        text toast_body { at: 18, 57; anchor: left top; size: 11
+                          width: 324; lines: 2; color: soft; show: toast_has_body }
+
+        //  time left
+        box { from: 18, 102; size: 324, 2; corner: 1; color: ink; opacity: 7% }
+        box { from: 18, 102; size: 324 * ttl, 2; corner: 1; color: if(toast_urgent, red, mint); opacity: 75% }
+
+        zone box toast_fill { from: 0, 0; size: 360, 116; corner: 14; cursor: pointer }
+    }
 
     // ── the panel: 400 wide, down the right ──────────────────────
-    box panel_edge { from: screen.width - 413, 51; size: 402, screen.height - 64; corner: 13; color: edge; show: open }
-    box panel_fill { from: screen.width - 412, 52; size: 400, screen.height - 66; corner: 12; color: coal; show: open }
+    group {
+        move: screen.width - 412 + 16 * (1 - pin), 52
+        opacity: pin
 
-    text "Уведомления" { at: screen.width - 396, 74; anchor: left center; size: 19; weight: 700; color: ink; show: open }
-    box clear_hit { from: screen.width - 103, 60; size: 75, 28; corner: 6; color: raised; cursor: pointer; show: open }
-    text "Очистить" { at: screen.width - 66, 74; anchor: center; size: 11; color: soft; show: open }
+        body {
+            color: panel; rim: 5%; light: 3%, 0, 150
+            border: 1, edge
+            shadow: 0, 14, 40, 28%
+            box { from: 0, 0; size: 400, screen.height - 66; corner: 14 }
+        }
 
-    column notelist { at: screen.width - 396, 104; view: 368, screen.height - 164; gap: 8; show: open
-        for n in notes { Card(n) }
+        row { at: 16, 28; anchor: left middle; gap: 8; align: center
+            text "Уведомления" { size: 17; weight: 700; color: ink }
+            row { padding: 4; fill: bluesoft; corner: 9; show: note_count > 0
+                space 3
+                text "{note_count}" { size: 11; weight: 700; color: mint }
+                space 3
+            }
+        }
+
+        //  «Очистить»: only when there is something to clear
+        box { from: 304, 14; size: 80, 28; corner: 8; color: mix(raised, hover, clear_hit.hover)
+              opacity: 1 - 0.2 * clear_hit.pressed; show: notes.count > 0 }
+        text "Очистить" { at: 344, 28; anchor: center; size: 11; weight: 700
+                          color: mix(soft, ink, clear_hit.hover); show: notes.count > 0 }
+        zone box clear_hit { from: 304, 14; size: 80, 28; corner: 8; cursor: pointer; show: notes.count > 0 }
+
+        column notelist { at: 16, 56; view: 368, screen.height - 134; gap: 8
+            for n in notes { Card(n) }
+        }
+
+        //  nothing here: a soft bell
+        group {
+            show: notes.count == 0
+            ellipse { at: 200, 206; radius: 30; color: raised }
+            path {
+                at: 200, 205; color: soft; opacity: 75%
+                move -9, 7; line -9, -1; curve 0, -10 via -9, -10; curve 9, -1 via 9, -10
+                line 9, 7; line 11.5, 10; line -11.5, 10; close
+            }
+            ellipse { at: 200, 218.5; radius: 2.6; color: soft; opacity: 75% }
+            ellipse { at: 200, 194.5; radius: 1.8; color: soft; opacity: 75% }
+            text "Новых уведомлений нет" { at: 200, 258; anchor: center; size: 13; color: soft }
+        }
     }
-    text "Новых уведомлений нет" { at: screen.width - 212, 300; anchor: center; size: 12; color: soft
-        show: open and notes.count == 0 }
 
-    // ── one notice ───────────────────────────────────────────────
+    // ── one notice: 368 × 96 ─────────────────────────────────────
     component Card(n: record) {
         size: 368, 96
-        prop hot = 0 ~quick
-        box { from: 0, 0; size: 368, 96; corner: 10; color: sheet }
-        box { from: 0, 0; size: 3, 96; corner: 1.5; color: if(n.urgent, red, mint) }
-        text n.app { at: 14, 16; anchor: left center; size: 11; weight: 700; width: 300; lines: 1; color: mint }
-        text n.title { at: 14, 38; anchor: left center; size: 13; weight: 700; width: 330; lines: 1; color: ink }
-        text n.body { at: 14, 62; anchor: left center; size: 11; width: 330; lines: 2; color: soft; show: n.has_body }
 
-        //  ×
-        box close { from: 334, 4; size: 26, 26; corner: 6; color: hover; opacity: hot; cursor: pointer }
-        text "×" { at: 347, 17; anchor: center; size: 17; color: soft }
-        on enter close { hot: 1 ~quick }
-        on leave close { hot: 0 ~quick }
-        on press close { emit dismiss(n.index) }
+        body {
+            color: mix(mix(sheet, redsoft, n.urgent * 0.35), raised, max(row_hit.hover, dismiss_hit.hover))
+            rim: 4%
+            box { from: 0, 0; size: 368, 96; corner: 10 }
+        }
+        //  how urgent: the bar at the left edge, and the dot by the app
+        box { from: 6, 16; size: 3, 64; corner: 1.5; color: if(n.urgent, red, mint) }
+        ellipse { at: 22, 18; radius: 3; color: if(n.urgent, red, mint) }
+        text n.app { at: 31, 18; anchor: left center; size: 11; weight: 700; width: 290; lines: 1; color: soft }
+        text n.title { at: 18, 40; anchor: left center; size: 13; weight: 700; width: 330; lines: 1; color: ink }
+        text n.body { at: 18, 52; anchor: left top; size: 11; width: 330; lines: 2; color: soft; show: n.has_body }
+
+        //  ×, shown while the card is under the pointer; its zone is its own
+        //  and is never faded, so it can always be pressed.
+        box { from: 334, 6; size: 26, 26; corner: 7; color: hover
+              opacity: dismiss_hit.hover * (1 - 0.3 * dismiss_hit.pressed) }
+        text "×" { at: 347, 18.5; anchor: center; size: 16; color: mix(soft, ink, dismiss_hit.hover)
+                   opacity: max(row_hit.hover, dismiss_hit.hover) }
+
+        zone box row_hit { from: 0, 0; size: 368, 96; corner: 10 }
+        zone box dismiss_hit { from: 334, 6; size: 26, 26; corner: 7; cursor: pointer }
+        on press dismiss_hit { emit dismiss(n.index) }
     }
 
     // ── the rules ────────────────────────────────────────────────
     on toggle     { toggle open }
     on key Escape { open = false }
     on press clear_hit { emit clear }
+    on press toast_fill { emit dismiss_toast }
+    on toast_new(v) while v > 0.5 { play ttl_long }
+    on toast_new(v) while v < 0.5 { play ttl_short }
+    on press dim {
+        open = if(local.x < screen.width - 413 or local.x > screen.width - 11
+                  or local.y < 51 or local.y > screen.height - 13, false, open)
+    }
 }

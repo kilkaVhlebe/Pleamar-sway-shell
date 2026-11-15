@@ -12,11 +12,16 @@ sys.watch("network", function(n)
         elseif x.known then note = "сохранено"
         elseif x.secure then note = "защищена"
         else note = "открыта" end
+        --  The signal bars read 0..1; the service says 0..1, a report in
+        --  0..100 is brought down to it.
+        local s = tonumber(x.strength) or 0
+        if s > 1 then s = s / 100 end
         list[i] = {
             ssid = x.ssid or "", note = note,
             active = x.active and 1 or 0,
             secure = x.secure and true or false,
             known  = x.known and true or false,
+            strength = s,
         }
     end
     model.wifi_nets = list
@@ -160,6 +165,13 @@ end)
 
 -- ── the bar's door and the launcher's release ────────────────────
 on("fact:open", function(v)
+    --  Closed by the bar's diamond or by Super: no dialog is left waiting
+    --  for the next opening.
+    if not v then
+        fact.pwd_open = false
+        fact.pwd_error = false
+        fact.ask = 0
+    end
     pcall(sys.call, "say", "bar", "emit center_state " .. (v and "1" or "0"))
 end)
 

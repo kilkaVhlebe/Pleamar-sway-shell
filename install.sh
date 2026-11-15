@@ -42,18 +42,32 @@ fi
 mkdir -p "$conf/pleamar" "$HOME/.local/bin"
 
 # ── the scenes ───────────────────────────────────────────────────
+#  Only our own folders are replaced: ~/.config/pleamar/shells may hold the
+#  user's other scenes too (the autostart file invites them there).
+#  An older install linked the whole folder; that link goes first.
+[ -L "$dest" ] && rm -f "$dest"
+mkdir -p "$dest"
+for part in "$here"/shells/*/; do
+    name=$(basename "$part")
+    rm -rf "${dest:?}/$name"
+    if [ "$mode" = link ]; then
+        ln -s "$here/shells/$name" "$dest/$name"
+    else
+        cp -a "$here/shells/$name" "$dest/$name"
+    fi
+done
 if [ "$mode" = link ]; then
-    rm -rf "$dest"
-    ln -s "$here/shells" "$dest"
-    echo "scenes:   $dest -> $here/shells"
+    echo "scenes:   $dest/* -> $here/shells/*"
 else
-    rm -rf "$dest"
-    mkdir -p "$dest"
-    cp -a "$here/shells/." "$dest/"
     echo "scenes:   $dest (copied)"
 fi
 
 # ── what starts them ─────────────────────────────────────────────
+#  A hand-edited autostart is kept aside, not lost.
+if [ -f "$conf/pleamar/autostart" ] && ! cmp -s "$here/config/autostart" "$conf/pleamar/autostart"; then
+    cp "$conf/pleamar/autostart" "$conf/pleamar/autostart.bak"
+    echo "autostart: previous one kept as $conf/pleamar/autostart.bak"
+fi
 install -m 0644 "$here/config/autostart" "$conf/pleamar/autostart"
 echo "autostart: $conf/pleamar/autostart"
 

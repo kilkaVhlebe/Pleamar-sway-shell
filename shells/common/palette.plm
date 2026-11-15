@@ -14,4 +14,9 @@ library Palette {
     let redsoft  = #54252d        // danger's ground (Theme.redSoft)
     let bluesoft = #203b67        // the accent's ground (Theme.blueSoft)
     let green    = #58c78a        // the good state (Theme.green)
+    //  Added with the visual pass: depth and a second warm accent.
+    let panel    = #14171d        // a floating panel's body, a step above coal
+    let glint    = #ffffff        // the light inside edge of a plate (used at 4–8 %)
+    let amber    = #e8b65a        // warnings: low battery, an armed confirm
+    let greensoft = #1d3a2c       // the good state's ground
 }

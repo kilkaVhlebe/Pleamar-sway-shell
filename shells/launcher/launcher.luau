@@ -50,7 +50,13 @@ on("text:query", filter)
 --  `xdg-terminal-exec`, which is what `apps.launch` asks for.
 local function words(s)
     local out = {}
-    for w in string.gmatch(s or "", "%S+") do out[#out + 1] = w end
+    for w in string.gmatch(s or "", "%S+") do
+        --  The .desktop field codes (%f %U %i %c %k …) are not arguments.
+        if not w:match("^%%%a$") then
+            w = w:gsub("^\"(.*)\"$", "%1"):gsub("%%%%", "%%")
+            out[#out + 1] = w
+        end
+    end
     return out
 end
 

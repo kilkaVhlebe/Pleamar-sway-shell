@@ -7,6 +7,11 @@
 // as the documentation puts it—: the tray's menu drops out of the bar and is
 // drawn here. Only what is drawn takes the click; the empty part lets it pass,
 // so the desktop underneath is not covered.
+//
+// Geometry, so the numbers below read: the pill is 5..w-5 × 4..40 (36 tall,
+// 1 px border, corner 11). Everything you can press is a 34 × 34 tile on y 5,
+// whose visible plate is 28 × 28 inset 3, corner 7 —3 px of air on every side,
+// concentric with the pill—. Tiles are 2 apart, so plates sit 8 apart.
 
 import "../common/palette.plm"
 import "../common/menu.plm"
@@ -36,14 +41,16 @@ scene Bar {
         fact ws.$i.there = false          // does that workspace exist?
         fact ws.$i.busy  = false          // does it have windows?
     }
-    //  The clock asks for itself; the logic composes the line the old bar showed.
+    //  The clock asks for itself; the logic composes the lines from it.
     service clock { hour: number; minute: number; day: number; month: number; weekday: number }
-    text clockline = ""
-    text lang      = "--"
+    text clockline  = ""                  // the whole line, as the old bar showed it
+    text clock_date = ""                  // "Sat, 15 Nov"
+    text clock_time = ""                  // "21:53"
+    text lang       = "--"
 
     //  The states the system reports; the scene reads them by itself.
     service network as net { online: bool }
-    service battery { present: bool; percent: number }
+    service battery { present: bool; percent: number; charging: bool }
 
     fact volume = 0
     fact muted  = false
@@ -59,7 +66,7 @@ scene Bar {
 
     // ── the tray and its menu ────────────────────────────────────
     //  The logic watches the tray: it maps `status` to a plain `attention`.
-    model tray_icons max 12 { key: text; title: text; attention: bool; icon: image 24, 24 }
+    model tray_icons max 12 { key: text; title: text; attention: bool; icon: image 20, 20 }
     model rows max 14 {
         label: text
         separator: bool
@@ -70,6 +77,11 @@ scene Bar {
     fact menu_open = false
     fact slot = 0                         // which icon the open menu belongs to
     fact menu_h = 16                      // the plate's height: 8 above, 8 below
+
+    //  The menu stays drawn while it leaves: it follows `menu_open`, and
+    //  closes once it has faded. The keyboard still goes by the fact.
+    prop menu_shown = 0 ~180ms
+    follow menu_shown = if(menu_open, 1, 0)
 
     // ── what the bar asks for ────────────────────────────────────
     event go ->            // (i): take me to workspace i
@@ -85,108 +97,221 @@ scene Bar {
 
 
     // ── the pill ─────────────────────────────────────────────────
-    //  The old bar was one plate, inset 5 and 4, with a 1 px border.
-    box pill_border { from: 5, 4; size: screen.width - 10, 36; corner: 9; color: edge }
-    box pill        { from: 6, 5; size: screen.width - 12, 34; corner: 8; color: sheet }
+    //  One plate with its border, a breath of light at the top going down to
+    //  a slightly deeper sheet, and a shadow that only just lifts it.
+    body {
+        gradient: 0, 4 to 0, 40, mix(sheet, glint, 4%), sheet 45%, mix(sheet, coal, 35%)
+        border: 1, edge
+        rim: 3%
+        shadow: 0, 1, 5, 18%
+        box { from: 5, 4; size: screen.width - 10, 36; corner: 11 }
+    }
+    //  The glint: one pixel of light along the top edge.
+    box { from: 17, 5; size: screen.width - 34, 1; color: glint; opacity: 6% }
 
-    // ── a door: 34 × 34, lit while its scene is open ─────────────
-    component Door(open_fact: bool, glyph: text, glyph_color: color, pressed: event) {
+    // ── a door: lit while its scene is open ──────────────────────
+    //  `badge_n` > 0 swaps the glyph for a red counter.
+    component Door(open_fact: bool, glyph: text, glyph_color: color, pressed: event, badge_n: number = 0) {
         size: 34, 34
-        prop hot = 0 ~quick
-        prop lit = 0 ~quick
-        follow lit = if(open_fact, 1, 0)
-        box hit { from: 0, 0; size: 34, 34; corner: 8; color: bluesoft
-                  opacity: max(lit, hot); cursor: pointer }
-        text glyph { at: 17, 17; anchor: center; size: 15; color: glyph_color }
-        on enter hit { hot: 1 ~quick }
-        on leave hit { hot: 0 ~quick }
+        prop lit   = 0 ~quick
+        prop badge = 0 ~quick
+        follow lit   = if(open_fact, 1, 0)
+        follow badge = if(badge_n > 0, 1, 0)
+
+        box { from: 3, 3; size: 28, 28; corner: 7; color: hover; opacity: hit.hover * 70% * (1 - lit) }
+        box { from: 3, 3; size: 28, 28; corner: 7; color: mix(bluesoft, mint, hit.hover * 18%); opacity: lit }
+        box { from: 3.5, 3.5; size: 27, 27; corner: 6.5; stroke: 1; color: mint; opacity: lit * 35% }
+        box { from: 3, 3; size: 28, 28; corner: 7; color: coal; opacity: hit.pressed * 25% }
+        text glyph { at: 17, 17; anchor: center; size: 14; color: mix(glyph_color, glint, lit * 35%); opacity: 1 - badge }
+
+        group {
+            pivot: 17, 17
+            scale: 0.6 + 0.4 * badge
+            opacity: badge
+            box { at: 17, 17; size: if(badge_n > 99, 30, if(badge_n > 9, 24, 18)), 18; corner: 9; color: red }
+            text "{badge_n, 0}" { at: 17, 17; anchor: center; size: 11; weight: 700; color: glint; opacity: badge_n > 0 }
+        }
+
+        zone box hit { from: 0, 0; size: 34, 34; corner: 8; cursor: pointer }
         on press hit { menu_open = false; emit pressed }
     }
 
     // ── one workspace ────────────────────────────────────────────
+    //  The filled plate of the active one is not here: it is the Marker,
+    //  which slides between them. A desk only lights its number.
     component Desk(i, active: number) {
         size: 34, 34
-        prop on  = 0 ~lively
-        prop hot = 0 ~quick
-        follow on = if(active == i, 1, 0)
-        box hit { from: 0, 0; size: 34, 34; corner: 8; color: mint
-                  opacity: on * 100% + hot * 30%; cursor: pointer }
-        text "{i}" { at: 17, 17; anchor: center; size: 13; weight: 600; color: mix(ink, coal, on) }
+        prop act = 0 ~calm
+        prop dot = 0 ~quick
+        follow act = if(active == i, 1, 0)
         //  A dot underneath if it has windows and you are not on it.
-        ellipse { at: 17, 28; radius: 1.8; color: ink; opacity: ws.$i.busy * (1 - on) * 70% }
-        on enter hit { hot: 1 ~quick }
-        on leave hit { hot: 0 ~quick }
+        follow dot = if(ws.$i.busy and active != i, 1, 0)
+
+        box { from: 3, 3; size: 28, 28; corner: 7; color: mix(hover, glint, act)
+              opacity: hit.hover * (70% - 60% * act) }
+        box { from: 3, 3; size: 28, 28; corner: 7; color: coal; opacity: hit.pressed * 22% }
+        text "{i}" { at: 17, 16; anchor: center; size: 13; weight: 600
+                     color: mix(mix(soft, ink, max(ws.$i.busy, hit.hover)), glint, act) }
+        ellipse { at: 17, 27.5; radius: 1.7; color: ink; opacity: dot * 60% }
+
+        zone box hit { from: 0, 0; size: 34, 34; corner: 8; cursor: pointer }
         on press hit { menu_open = false; emit go(i) }
+    }
+
+    // ── the active workspace's plate, sliding ────────────────────
+    //  Desks collapse with `show:`, so desk k sits after as many tiles as
+    //  there are desks before it: that count, times 36, is where the plate
+    //  goes. `seen` hides it while the active one is not in the row.
+    component Marker(active: number) {
+        size: 34, 34
+        prop pos  = 0 ~calm
+        prop seen = 0 ~quick
+        //  (In parentheses, so the sum may go on over several lines.)
+        follow pos = (ws.1.there * (active > 1) + ws.2.there * (active > 2) + ws.3.there * (active > 3)
+                    + ws.4.there * (active > 4) + ws.5.there * (active > 5) + ws.6.there * (active > 6)
+                    + ws.7.there * (active > 7) + ws.8.there * (active > 8) + ws.9.there * (active > 9))
+        follow seen = (ws.1.there * (active == 1) + ws.2.there * (active == 2) + ws.3.there * (active == 3)
+                     + ws.4.there * (active == 4) + ws.5.there * (active == 5) + ws.6.there * (active == 6)
+                     + ws.7.there * (active == 7) + ws.8.there * (active == 8) + ws.9.there * (active == 9)
+                     + ws.10.there * (active == 10))
+        body {
+            color: mint
+            rim: 12%
+            shadow: 0, 1, 8, 30%, mint
+            opacity: seen
+            box { from: 3 + pos * 36, 3; size: 28, 28; corner: 7 }
+        }
     }
 
     // ── one tray icon ────────────────────────────────────────────
     component TrayIcon(i) {
-        size: 30, 30
-        prop lift = 0 ~quick
-        box hit { from: 0, 0; size: 30, 30; corner: 7; color: hover; opacity: lift * 100%; cursor: pointer }
-        box { from: 0, 0; size: 30, 30; corner: 7; color: redsoft
-              opacity: if(i.attention, 100%, 0%) }
-        image i.icon { at: 3, 3; size: 24, 24 }
-        on enter hit { lift: 1 ~quick }
-        on leave hit { lift: 0 ~quick }
-        on press hit       { emit activate(i.index) }
+        size: 34, 34
+        prop warn = 0 ~calm
+        prop mine = 0 ~quick
+        follow warn = if(i.attention, 1, 0)
+        //  Lit while its own menu is the one open.
+        follow mine = if(menu_open and slot == i.index, 1, 0)
+
+        box { from: 3, 3; size: 28, 28; corner: 7; color: hover; opacity: hit.hover * 70% * (1 - mine) }
+        //  Asking for attention: a quiet red ground and a thin red edge, no pulse.
+        box { from: 3, 3; size: 28, 28; corner: 7; color: redsoft; opacity: warn * 85% }
+        box { from: 3.5, 3.5; size: 27, 27; corner: 6.5; stroke: 1; color: red; opacity: warn * 30% }
+        box { from: 3, 3; size: 28, 28; corner: 7; color: bluesoft; opacity: mine }
+        box { from: 3, 3; size: 28, 28; corner: 7; color: coal; opacity: hit.pressed * 22% }
+        image i.icon { at: 7, 7; size: 20, 20 }
+
+        zone box hit { from: 0, 0; size: 34, 34; corner: 8; cursor: pointer; label: "{i.title}" }
+        on press hit       { menu_open = false; emit activate(i.index) }
         on press right hit { slot = i.index; emit menu(i.index) }
     }
 
     // ── on the left ──────────────────────────────────────────────
+    //  The marker goes first, under the numbers. The desks start at
+    //  6 + 34 (door) + 8 + 1 (divider) + 8 = 57.
+    Marker(mon.$screen.active) { move: 57, 5 }
+
     row leftside {
-        at: 15, 5
-        gap: 10
+        at: 6, 5
+        gap: 8
         align: center
 
         Door(center_open, "◆", mint, pressed: open_center)
+        box { size: 1, 18; color: edge }
         row desks ~calm {
-            gap: 3
+            gap: 2
             align: center
             repeat i in 1..11 { Desk(i, mon.$screen.active) { show: ws.$i.there } }
         }
-        box { size: 1, 24; color: edge }
     }
 
     // ── on the right ─────────────────────────────────────────────
     row rightside {
-        at: screen.width - 15, 5
+        at: screen.width - 6, 5
         anchor: right
         gap: 10
         align: center
 
-        row tray { gap: 3; align: center; show: tray_icons.count > 0
+        row { gap: 2; align: center; show: tray_icons.count > 0
             for i in tray_icons { TrayIcon(i) } }
 
-        text if(net.online, "●", "○") { size: 13; color: if(net.online, green, soft) }
+        //  The state of the machine, in one quiet well.
+        row { gap: 0; align: center; fill: raised 75%; corner: 7
 
-        row vol { gap: 7; align: center; cursor: pointer
-            text if(muted, "×", "♪") { size: 14; color: if(muted, red, ink) }
-            text "{volume * 100, 0}%" { size: 13; color: soft; show: not muted }
+            //  The network: a lit dot, or an empty ring.
+            group { size: 26, 28
+                ellipse { at: 13, 14; radius: 6; color: green; opacity: net.online * 18% }
+                ellipse { at: 13, 14; radius: 3.5; color: green; opacity: net.online }
+                ellipse { at: 13, 14; radius: 3.5; stroke: 1.2; color: soft; opacity: 1 - net.online }
+            }
+
+            //  The sound: the wheel steps it, a click mutes it.
+            group { size: 60, 28
+                box { from: 0, 0; size: 60, 28; corner: 7; color: hover; opacity: vol.hover * 70% }
+                box { from: 0, 0; size: 60, 28; corner: 7; color: coal; opacity: vol.pressed * 22% }
+                text if(muted, "×", "♪") { at: 13, 14; anchor: center; size: 14; color: if(muted, red, ink) }
+                text "{volume * 100, 0}%" { at: 54, 14; anchor: right center; size: 12.5; color: soft
+                                            opacity: 1 - muted * 55% }
+                zone box vol { from: 0, 0; size: 60, 28; corner: 7; cursor: pointer; label: "Громкость" }
+            }
+
+            //  The battery, drawn: amber under 20 %, red under 10 %, green
+            //  while it charges.
+            group { size: 70, 28; show: battery.present
+                box { from: 6, 9.5; size: 18, 10; corner: 2.5; stroke: 1.2; opacity: 85%
+                      color: if(battery.charging, green, if(battery.percent < 10, red, if(battery.percent < 20, amber, ink))) }
+                box { from: 24.5, 12.5; size: 2, 4; corner: 1; opacity: 85%
+                      color: if(battery.charging, green, if(battery.percent < 10, red, if(battery.percent < 20, amber, ink))) }
+                box { from: 8, 11.5; size: max(1.5, 14 * clamp(battery.percent, 0, 100) / 100), 6; corner: 1.2
+                      color: if(battery.charging, green, if(battery.percent < 10, red, if(battery.percent < 20, amber, ink))) }
+                text "{battery.percent, 0}%" { at: 64, 14; anchor: right center; size: 12.5; weight: 600
+                      color: if(battery.percent < 10, red, if(battery.percent < 20, amber, ink)) }
+            }
+
+            //  The keyboard's language.
+            group { size: 32, 28
+                text lang { at: 16, 14; anchor: center; size: 12; weight: 700; color: ink; opacity: 85% }
+            }
         }
 
-        text "▣ {battery.percent, 0}%" { size: 13; weight: 600
-            color: if(battery.percent < 20, red, ink); show: battery.present }
-
-        text lang { size: 13.5; weight: 700; color: mint }
-
-        text clockline { size: 13.5; color: ink }
+        //  The clock: the date quiet, the time bold.
+        row { gap: 7; align: center
+            text clock_date { size: 12.5; color: soft }
+            text clock_time { size: 13.5; weight: 700; color: ink }
+        }
 
         Door(notes_open, if(notes_count > 0, "●", "○"),
-             if(notes_count > 0, red, soft), pressed: open_notes)
+             if(notes_count > 0, red, soft), pressed: open_notes, badge_n: notes_count)
     }
 
     // ── the tray's menu ──────────────────────────────────────────
     //  Under its icon, as tall as its list (the logic keeps `menu_h`). The
     //  place is an expression, not a `let`: a `let` is worked out before the
-    //  rows are laid out, and would read a width of nought.
-    box menu_edge  { from: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256), 46
-                     size: 248, menu_h; corner: 10; color: edge; show: menu_open }
-    box menu_plate { from: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256) + 1, 47
-                     size: 246, menu_h - 2; corner: 9; color: raised; show: menu_open }
-    column menu_list { at: clamp(screen.width - 15 - rightside.width + slot * 33 - 109, 8, screen.width - 256) + 8, 54
-        show: menu_open
-        for r in rows { MenuRow(r, chosen: choose, width: 232) } }
+    //  rows are laid out, and would read a width of nought. The tray is the
+    //  first thing in `rightside`, and icon k's centre is 17 + 36 k from its
+    //  left edge; the plate is 240 wide, centred under it.
+    //
+    //  It fades in while it drops 8 px into place, and back out on closing.
+    group {
+        show: menu_open or menu_shown > 0.01
+        opacity: menu_shown
+        move: clamp(screen.width - 6 - rightside.width + slot * 36 - 103, 8, screen.width - 248), 46 - 8 * (1 - menu_shown)
+
+        body {
+            color: panel
+            border: 1, edge
+            rim: 4%
+            shadow: 0, 10, 28, 30%
+            box { from: 0, 0; size: 240, menu_h; corner: 12 }
+        }
+        box { from: 14, 1; size: 212, 1; color: glint; opacity: 6% }
+
+        //  The plate's own margins take the click, so it does not fall
+        //  through to the window under the menu.
+        zone box menu_catch { from: 0, 0; size: 240, menu_h; corner: 12 }
+
+        column menu_list { at: 6, 8
+            for r in rows { MenuRow(r, chosen: choose, width: 228, live: menu_open) } }
+    }
 
     // ── the rules ────────────────────────────────────────────────
     on center_state(v) { center_open = v > 0 }
@@ -196,7 +321,7 @@ scene Bar {
     on press leftside  { menu_open = false }
     on press rightside { menu_open = false }
     on scroll vol      { emit volume_step(wheel) }
-    on press vol       { emit mute }
+    on press vol       { menu_open = false; emit mute }
 
     //  The tray menu's ways out: Escape, or a press on another window.
     on key Escape { menu_open = false }

@@ -9,7 +9,8 @@ scene Clipboard {
         size: full, full
         anchor: top_left
         level: overlay
-        open: open
+        //  It stays while the panel finishes leaving, not a frame longer.
+        open: open or seen > 0.01
         screens: each
         keyboard: exclusive while open
     }
@@ -41,68 +42,151 @@ scene Clipboard {
     event clear_req ->                    // the clear button
 
 
+    // ── opening and closing ──────────────────────────────────────
+    prop seen = 0 ~240ms
+    layer reveal ~quick {
+        opened while open { seen: 1 ~240ms }
+        closed            { seen: 0 ~160ms }
+    }
+    //  The clear button growing into its confirmation.
+    prop arm = 0 ~200ms
+    follow arm = confirm
+
+
     // ── the desktop, dimmed ──────────────────────────────────────
-    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% }
+    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% * seen }
 
     // ── the panel: 640 × 520, in the middle ──────────────────────
-    box panel_edge { from: (screen.width - 640) / 2 - 1, (screen.height - 520) / 2 - 1
-                     size: 642, 522; corner: 13; color: edge }
-    box panel_fill { from: (screen.width - 640) / 2, (screen.height - 520) / 2
-                     size: 640, 520; corner: 12; color: coal }
+    //  Drawn from its own corner; the group centres it, lifts it into place
+    //  and fades it.
+    group {
+        move: (screen.width - 640) / 2, (screen.height - 520) / 2 + 10 * (1 - seen)
+        pivot: 320, 260
+        scale: 0.98 + 0.02 * seen
+        opacity: seen
 
-    // ── the head ─────────────────────────────────────────────────
-    box head_tile { from: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 16
-                    size: 34, 34; corner: 8; color: bluesoft }
-    text "▣" { at: (screen.width - 640) / 2 + 33, (screen.height - 520) / 2 + 33; anchor: center; size: 18; weight: 700; color: mint }
-    text "История буфера обмена" { at: (screen.width - 640) / 2 + 62, (screen.height - 520) / 2 + 26; anchor: left center; size: 18; weight: 700; color: ink }
-    text count_text { at: (screen.width - 640) / 2 + 62, (screen.height - 520) / 2 + 44; anchor: left center; size: 10; color: soft }
+        body {
+            color: panel; rim: 5%; light: 3%, 0, 150
+            border: 1, edge
+            shadow: 0, 18, 48, 30%
+            box { from: 0, 0; size: 640, 520; corner: 14 }
+        }
 
-    box clear_bg { from: screen.width / 2 + 320 - 16 - (82 + confirm * 30), (screen.height - 520) / 2 + 16
-                   size: 82 + confirm * 30, 32; corner: 7; color: mix(raised, redsoft, confirm); cursor: pointer }
-    text if(confirm, "Подтвердить", "Очистить") { at: screen.width / 2 + 320 - 16 - (82 + confirm * 30) / 2, (screen.height - 520) / 2 + 32
-        anchor: center; size: 11; color: if(confirm, red, soft) }
+        // ── the head ─────────────────────────────────────────────
+        //  a tile with a clipboard drawn in it
+        body {
+            color: bluesoft; rim: 6%
+            box { from: 16, 16; size: 36, 36; corner: 10 }
+        }
+        box { from: 26, 24; size: 16, 21; corner: 3; stroke: 1.6; color: mint }
+        box { from: 30, 21.5; size: 8, 5; corner: 2; color: mint }
+        line { from: 29.5, 33; to: 38.5, 33; width: 1.5; color: mint; opacity: 70% }
+        line { from: 29.5, 38; to: 35.5, 38; width: 1.5; color: mint; opacity: 70% }
 
-    // ── the search ───────────────────────────────────────────────
-    box field_plate { from: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 64
-                      size: 608, 44; corner: 8; color: raised }
-    input query { at: (screen.width - 640) / 2 + 30, (screen.height - 520) / 2 + 78
-                  width: 580; size: 14; color: ink; placeholder: "Поиск в истории…"; selection: bluesoft }
+        text "История буфера обмена" { at: 64, 26; anchor: left center; size: 16; weight: 700; color: ink }
+        text count_text { at: 64, 44; anchor: left center; size: 11; color: soft }
 
-    // ── the history ──────────────────────────────────────────────
-    column history { at: (screen.width - 640) / 2 + 16, (screen.height - 520) / 2 + 120
-        view: 608, 352; gap: 4
-        for c in clips { Card(c) }
+        //  «Очистить», and once pressed «Подтвердить» for three seconds: it
+        //  widens and warms up so the second press is a decision.
+        box { from: 624 - (84 + 30 * arm), 18; size: 84 + 30 * arm, 32; corner: 8
+              color: mix(mix(raised, hover, clear_hit.hover), redsoft, arm)
+              opacity: 1 - 0.2 * clear_hit.pressed }
+        box { from: 624 - (84 + 30 * arm), 18; size: 84 + 30 * arm, 32; corner: 8; stroke: 1
+              color: amber; opacity: 60% * arm }
+        //  the two words cross-fade while the plate widens
+        text "Очистить" { at: 624 - (84 + 30 * arm) / 2, 34; anchor: center; size: 11; weight: 700
+              color: mix(soft, ink, clear_hit.hover); opacity: 1 - arm }
+        text "Подтвердить" { at: 624 - (84 + 30 * arm) / 2, 34; anchor: center; size: 11; weight: 700
+              color: amber; opacity: arm }
+        zone box clear_hit { from: 624 - (84 + 30 * arm), 18; size: 84 + 30 * arm, 32; corner: 8; cursor: pointer
+                           label: pick(confirm, "Очистить", "Подтвердить") }
+
+        // ── the search ───────────────────────────────────────────
+        box { from: 13, 61; size: 614, 50; corner: 13; color: mint; opacity: 12% }
+        body {
+            color: raised; rim: 5%
+            box { from: 16, 64; size: 608, 44; corner: 10 }
+        }
+        box { from: 16, 64; size: 608, 44; corner: 10; stroke: 1; color: mint; opacity: 55% }
+        ellipse { at: 35, 84; radius: 6.5; stroke: 1.8; color: soft }
+        line { from: 39.8, 88.8; to: 44.5, 93.5; width: 2; color: soft }
+        input query { at: 58, 77; width: 548; size: 14; color: ink; placeholder: "Поиск в истории…"; selection: bluesoft }
+
+        // ── the history ──────────────────────────────────────────
+        column history { at: 16, 120
+            view: 608, 348; gap: 4
+            for c in clips { Card(c) }
+        }
+
+        //  nothing kept yet
+        group {
+            show: clips.count == 0
+            ellipse { at: 320, 262; radius: 28; color: raised }
+            box { from: 311, 250; size: 18, 23; corner: 3; stroke: 1.8; color: soft }
+            box { from: 315.5, 247; size: 9, 5.5; corner: 2; color: soft }
+            text "История пока пуста" { at: 320, 312; anchor: center; size: 13; color: soft }
+        }
+
+        // ── the keys ─────────────────────────────────────────────
+        box { from: 16, 478; size: 608, 1; color: ink; opacity: 6% }
+        row { at: 320, 499; anchor: center middle; gap: 6; align: center
+            Cap("↑↓")
+            text "выбор" { size: 10; color: soft }
+            space 10
+            Cap("Enter")
+            text "скопировать" { size: 10; color: soft }
+            space 10
+            Cap("Esc")
+            text "закрыть" { size: 10; color: soft }
+        }
     }
-    text "История пока пуста" { at: screen.width / 2, (screen.height - 520) / 2 + 280; anchor: center
-        size: 13; color: soft; show: clips.count == 0 }
 
-    text "↑↓ выбор   Enter скопировать   Esc закрыть" { at: screen.width / 2, (screen.height - 520) / 2 + 502; anchor: center
-        size: 10; color: soft }
+    // ── a key, as a small cap ────────────────────────────────────
+    component Cap(label: text) {
+        row { padding: 4; fill: raised; corner: 5
+            text label { size: 10; weight: 700; color: ink }
+        }
+    }
 
-    // ── one entry ────────────────────────────────────────────────
+    // ── one entry: 58 tall, 76 with a picture ────────────────────
     component Card(c: record) {
         size: 608, 58 + c.is_image * 18
-        prop hot = 0 ~quick
-        prop on  = 0 ~quick
+        prop on = 0 ~quick
         follow on = if(sel == c.index, 1, 0)
 
-        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: hover; opacity: hot }
-        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: bluesoft; opacity: on }
-        box hit { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 8; color: ink; opacity: 0; cursor: pointer }
+        //  ground, hover, chosen —the chosen one with its accent bar—
+        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 10; color: raised; opacity: 40% }
+        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 10; color: hover; opacity: 70% * hit.hover * (1 - on) }
+        body {
+            color: bluesoft; rim: 6%; opacity: on
+            box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 10 }
+        }
+        box { from: 4, (58 + c.is_image * 18) / 2 - 12; size: 3, 24; corner: 1.5; color: mint; opacity: on }
+        box { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 10; color: #000000; opacity: 18% * hit.pressed }
 
-        //  the tile: 34 × 34 for text, 72 × 56 for a picture
-        box { from: 12, 12; size: 34 + c.is_image * 38, 34 + c.is_image * 22; corner: 8
-              color: if(c.is_binary, redsoft, raised) }
-        image c.thumb { at: 13, 11; size: 68, 52; show: c.is_image }
-        text c.glyph { at: 29 + c.is_image * 19, 29 + c.is_image * 11; anchor: center; size: 15; weight: 700
-                       color: if(c.is_binary, red, mint); show: c.glyph_show }
-        text c.title { at: 57 + c.is_image * 38, 16 + c.is_image * 10; anchor: left center; size: 12
-                       width: 480 - c.is_image * 38; lines: 2; color: ink }
-        text c.note { at: 57 + c.is_image * 38, 36 + c.is_image * 10; anchor: left center; size: 9
-                      width: 480; lines: 1; color: soft; show: c.has_note }
+        //  the type: a tinted tile with T or ◆ for text and data …
+        box { from: 14, 12; size: 34, 34; corner: 9; color: if(c.is_binary, redsoft, bluesoft); show: not c.is_image }
+        //  … and for a picture, its preview, rounded, over a ground that shows
+        //  ▧ until the preview is made
+        group {
+            show: c.is_image
+            clip box { from: 14, 10; size: 72, 56; corner: 8 }
+            box { from: 14, 10; size: 72, 56; color: greensoft }
+            image c.thumb { at: 14, 10; size: 72, 56 }
+        }
+        box { from: 14, 10; size: 72, 56; corner: 8; stroke: 1; color: glint; opacity: 8%; show: c.is_image }
+        text c.glyph { at: 31 + c.is_image * 19, 29 + c.is_image * 9; anchor: center; size: 15; weight: 700
+                       color: if(c.is_image, green, if(c.is_binary, red, mint)); show: c.glyph_show }
 
-        on enter hit { hot: 1 ~quick; sel = c.index }
-        on leave hit { hot: 0 ~quick }
+        text c.title { at: 60 + c.is_image * 38, (58 + c.is_image * 18) / 2 - 9 * c.has_note; anchor: left center
+                       size: 12; width: 520 - c.is_image * 38; lines: if(c.has_note, 1, 2); color: ink }
+        text c.note { at: 60 + c.is_image * 38, (58 + c.is_image * 18) / 2 + 10; anchor: left center; size: 10
+                      width: 520 - c.is_image * 38; lines: 1; color: soft; show: c.has_note }
+
+        //  The zone is not painted: a shape at opacity 0 would catch nothing.
+        zone box hit { from: 0, 0; size: 608, 58 + c.is_image * 18; corner: 10; cursor: pointer }
+
+        on enter hit { sel = c.index }
         on press hit { sel = c.index; emit pick(c.index) }
     }
 
@@ -112,7 +196,7 @@ scene Clipboard {
     on key Down   { sel = min(sel + 1, max(clips.count - 1, 0)) }
     on key Up     { sel = max(sel - 1, 0) }
     on submit query { emit pick(sel) }
-    on press clear_bg { emit clear_req }
+    on press clear_hit { emit clear_req }
 
     //  A press on the dimmed part closes it — not one on the panel.
     on press dim {

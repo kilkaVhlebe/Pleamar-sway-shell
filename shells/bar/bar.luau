@@ -67,6 +67,9 @@ local function compose_clock()
     if not wd or not d or not mo or not h or not mi then return end
     text.clockline = string.format("%s, %02d %s  %02d:%02d",
         days[wd + 1] or "--", d, months[mo] or "--", h, mi)
+    --  The same, in two: the bar draws the date quiet and the time bold.
+    text.clock_date = string.format("%s, %02d %s", days[wd + 1] or "--", d, months[mo] or "--")
+    text.clock_time = string.format("%02d:%02d", h, mi)
 end
 
 on("fact:clock.minute", compose_clock)
@@ -106,17 +109,49 @@ spawn("swaymsg", { "-m", "-t", "subscribe", '["input"]' }, function(line)
     end
 end)
 
--- ── the tray's menu: a tree, walked one level at a time ──────────
-local owner = nil                -- which icon the open menu belongs to
-local root, path = {}, {}        -- that menu, whole; and which submenus have been entered
+-- ── the tray's icons ──────────────────────────────────────────────
+--  The service reports `status` (Active, Passive, NeedsAttention); the scene
+--  only wants to know whether it asks for attention. 12 fit in the model.
+sys.watch("tray", function(list)
+    local icons = {}
+    for i, it in ipairs(list or {}) do
+        if i > 12 then break end
+        icons[i] = {
+            key = it.key or "",
+            title = it.title or "",
+            attention = it.status == "NeedsAttention",
+            icon = it.icon or "",
+        }
+    end
+    model.tray_icons = icons
+end)
 
+-- ── the tray's menu: a tree, walked one level at a time ──────────
+local owner = nil               -- which icon the open menu belongs to
+local root, path = {}, {}        -- that menu, whole; and which submenus have been entered
+local current = {}               -- the items the menu shows now, as the tray gave them
+
+--  The model only keeps the fields it declares (`children` is a count there),
+--  so the items themselves —their ids, their submenus— stay here, in `current`.
 local function show(list)
-    local rows = #path > 0 and { { back = true, label = "‹  Назад" } } or {}
-    for _, it in ipairs(list) do rows[#rows + 1] = it end
-    --  The plate's height: 8 above, 8 below, and 30 for a row (9 for a stripe).
-    local h = 16
-    for _, r in ipairs(rows) do
-        if r.separator then h = h + 9 else h = h + 30 end
+    current = {}
+    if #path > 0 then current[1] = { back = true, label = "‹  Назад" } end
+    for _, it in ipairs(list or {}) do
+        if #current >= 14 then break end          -- the model holds 14
+        current[#current + 1] = it
+    end
+    local rows, h = {}, 16       -- 8 above, 8 below, 30 for a row (9 for a stripe)
+    for i, it in ipairs(current) do
+        local sep = it.separator and true or false
+        rows[i] = {
+            label = it.label or "",
+            separator = sep,
+            enabled = it.back or it.enabled ~= false,
+            checked = (it.checked == true or it.checked == 1) and 1
+                      or ((it.checked == false or it.checked == 0) and 0 or -1),
+            children = type(it.children) == "table" and #it.children or 0,
+        }
+        h = h + (sep and 9 or 30)
     end
     fact.menu_h = h
     model.rows = rows
@@ -142,15 +177,16 @@ on("menu", function(i)
 end)
 
 on("choose", function(i)
-    local r = model.rows[i + 1]
+    local r = current[i + 1]
+    if not r or r.separator or (r.enabled == false and not r.back) then return end
     if r.back then
         table.remove(path)
         show(#path > 0 and path[#path].children or root)
-    elseif r.children and #r.children > 0 then
+    elseif type(r.children) == "table" and #r.children > 0 then
         path[#path + 1] = r
         show(r.children)
     else
-        sys.call("tray.menu_click", owner.key, r.id)
+        if owner then pcall(sys.call, "tray.menu_click", owner.key, r.id) end
         fact.menu_open = false
     end
 end)

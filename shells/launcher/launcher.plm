@@ -10,7 +10,8 @@ scene Launcher {
         size: full, full
         anchor: top_left
         level: overlay
-        open: open
+        //  It stays while the panel finishes leaving, not a frame longer.
+        open: open or seen > 0.01
         screens: each
         //  The keyboard, whole, but only while it is open: closed it does not exist.
         keyboard: exclusive while open
@@ -32,50 +33,114 @@ scene Launcher {
     event launch ->                        // (i): launch that hit
 
 
+    // ── opening and closing ──────────────────────────────────────
+    //  In unhurried, out a little quicker; whoever sets `open` knows nothing
+    //  about springs.
+    prop seen = 0 ~240ms
+    layer reveal ~quick {
+        opened while open { seen: 1 ~240ms }
+        closed            { seen: 0 ~160ms }
+    }
+    //  The selection is one plate that slides between rows (all 48 + 3 tall).
+    prop slide = 0 ~180ms
+    follow slide = sel
+
+
     // ── the desktop, dimmed ──────────────────────────────────────
-    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% }
+    box dim { from: 0, 0; size: screen.width, screen.height; color: #000000; opacity: 40% * seen }
 
     // ── the panel, in the middle: 620 × 480 ──────────────────────
-    box panel_edge { from: (screen.width - 620) / 2 - 1, (screen.height - 480) / 2 - 1
-                     size: 622, 482; corner: 13; color: edge }
-    box panel_fill { from: (screen.width - 620) / 2, (screen.height - 480) / 2
-                     size: 620, 480; corner: 12; color: coal }
-    //  (What the panel draws lies over the dim, so a press on it is its own.)
+    //  Everything below is drawn from the panel's own corner; the group puts
+    //  it in the middle, lifts it a few px into place and fades it.
+    group {
+        move: (screen.width - 620) / 2, (screen.height - 480) / 2 + 10 * (1 - seen)
+        pivot: 310, 240
+        scale: 0.98 + 0.02 * seen
+        opacity: seen
 
-    // ── the field ────────────────────────────────────────────────
-    box field_plate { from: (screen.width - 620) / 2 + 16, (screen.height - 480) / 2 + 16
-                      size: 588, 44; corner: 8; color: raised }
-    input query { at: (screen.width - 620) / 2 + 30, (screen.height - 480) / 2 + 30
-                  width: 560; size: 14; color: ink; placeholder: "Поиск приложений…"
-                  selection: bluesoft }
+        body {
+            color: panel; rim: 5%; light: 3%, 0, 150
+            border: 1, edge
+            shadow: 0, 18, 48, 30%
+            box { from: 0, 0; size: 620, 480; corner: 14 }
+        }
 
-    // ── the results ──────────────────────────────────────────────
-    column results { at: (screen.width - 620) / 2 + 16, (screen.height - 480) / 2 + 70; gap: 3
-        for h in hits { Hit(h) }
+        // ── the field ────────────────────────────────────────────
+        //  It always has the keys while the panel is up: a calm accent ring
+        //  and a soft halo say so.
+        box { from: 13, 13; size: 594, 54; corner: 13; color: mint; opacity: 12% }
+        body {
+            color: raised; rim: 5%
+            box { from: 16, 16; size: 588, 48; corner: 10 }
+        }
+        box { from: 16, 16; size: 588, 48; corner: 10; stroke: 1; color: mint; opacity: 55% }
+        //  the magnifier
+        ellipse { at: 35, 38; radius: 6.5; stroke: 1.8; color: soft }
+        line { from: 39.8, 42.8; to: 44.5, 47.5; width: 2; color: soft }
+        input query { at: 58, 31; width: 528; size: 14; color: ink; placeholder: "Поиск приложений…"
+                      selection: bluesoft }
+
+        // ── the results ──────────────────────────────────────────
+        //  the plate that follows `sel`, under the rows
+        body {
+            color: bluesoft; rim: 6%
+            show: hits.count > 0
+            box { from: 16, 80 + slide * 51; size: 588, 48; corner: 10 }
+        }
+        box { from: 20, 80 + slide * 51 + 13; size: 3, 22; corner: 1.5; color: mint; show: hits.count > 0 }
+
+        column results { at: 16, 80; gap: 3
+            for h in hits { Hit(h) }
+        }
+
+        //  nothing matched
+        group {
+            show: hits.count == 0
+            ellipse { at: 310, 222; radius: 26; color: raised }
+            ellipse { at: 307, 219; radius: 9; stroke: 2.2; color: soft }
+            line { from: 313.5, 225.5; to: 320, 232; width: 2.6; color: soft }
+            text "Ничего не найдено" { at: 310, 272; anchor: center; size: 13; color: soft }
+        }
+
+        // ── the keys, under the list ─────────────────────────────
+        box { from: 16, 446; size: 588, 1; color: ink; opacity: 6% }
+        row { at: 310, 463; anchor: center middle; gap: 6; align: center
+            Cap("↑↓")
+            text "выбор" { size: 10; color: soft }
+            space 10
+            Cap("Enter")
+            text "запуск" { size: 10; color: soft }
+            space 10
+            Cap("Esc")
+            text "закрыть" { size: 10; color: soft }
+        }
     }
-    text "Ничего не найдено" { at: screen.width / 2, (screen.height - 480) / 2 + 260; anchor: center
-        size: 13; color: soft; show: hits.count == 0 }
 
-    //  The keys, under the list.
-    text "↑↓ выбор   Enter запуск   Esc закрыть" { at: screen.width / 2, (screen.height - 480) / 2 + 458; anchor: center
-        size: 10; color: soft }
+    // ── a key, as a small cap ────────────────────────────────────
+    component Cap(label: text) {
+        row { padding: 4; fill: raised; corner: 5
+            text label { size: 10; weight: 700; color: ink }
+        }
+    }
 
     // ── one hit: 588 × 48 ────────────────────────────────────────
     component Hit(h: record) {
         size: 588, 48
-        prop hot = 0 ~quick
-        prop on  = 0 ~quick
+        prop on = 0 ~quick
         follow on = if(sel == h.index, 1, 0)
 
-        box { from: 0, 0; size: 588, 48; corner: 7; color: hover; opacity: hot }
-        box { from: 0, 0; size: 588, 48; corner: 7; color: bluesoft; opacity: on }
-        box hit { from: 0, 0; size: 588, 48; corner: 7; color: ink; opacity: 0; cursor: pointer }
-        image h.icon { at: 12, 10; size: 28, 28 }
-        text h.name { at: 50, 16; anchor: left center; size: 13; width: 520; lines: 1; color: ink }
-        text h.sub { at: 50, 34; anchor: left center; size: 10; width: 520; lines: 1; color: soft; show: h.has_sub }
+        //  Under the pointer, before the plate has slid there.
+        box { from: 0, 0; size: 588, 48; corner: 10; color: hover; opacity: 70% * hit.hover * (1 - on) }
+        box { from: 0, 0; size: 588, 48; corner: 10; color: #000000; opacity: 18% * hit.pressed }
+        image h.icon { at: 14, 10; size: 28, 28 }
+        text h.name { at: 54, if(h.has_sub, 17, 24); anchor: left center; size: 13; width: 516; lines: 1
+                      color: ink; opacity: 86% + 14% * on }
+        text h.sub { at: 54, 33; anchor: left center; size: 11; width: 516; lines: 1; color: soft; show: h.has_sub }
 
-        on enter hit { hot: 1 ~quick; sel = h.index }
-        on leave hit { hot: 0 ~quick }
+        //  The zone is not painted: a shape at opacity 0 would catch nothing.
+        zone box hit { from: 0, 0; size: 588, 48; corner: 10; cursor: pointer }
+
+        on enter hit { sel = h.index }
         on press hit { sel = h.index; emit launch(h.index) }
     }
 
@@ -86,6 +151,11 @@ scene Launcher {
     on key Up      { sel = max(sel - 1, 0) }
     on submit query { emit launch(sel) }
 
-    //  A press on the dimmed part closes it.
-    on press dim { open = false }
+    //  A press on the dimmed part closes it — not one on the panel, which
+    //  has no zone of its own and would let the press reach the dim.
+    on press dim {
+        open = if(local.x < (screen.width - 620) / 2 or local.x > (screen.width + 620) / 2
+                  or local.y < (screen.height - 480) / 2 or local.y > (screen.height + 480) / 2,
+                  false, open)
+    }
 }

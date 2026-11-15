@@ -3,9 +3,13 @@
 
 local entries = {}                -- everything, as cliphist gives it
 local view = {}                   -- the rows the scene shows, in order
+local thumbs = {}                 -- id -> preview path, made once and kept
+local asked = {}                  -- id -> true while its preview is being made
+local previews                    -- (below) previews for the rows on show
 
 -- ── the Russian count of the things ─────────────────────────────
 local function count_text(n)
+    if n == 0 then return "История пуста" end
     local last_two, last = n % 100, n % 10
     local word = "элементов"
     if last_two < 11 or last_two > 14 then
@@ -17,10 +21,11 @@ end
 
 local function filter()
     local q = (text.query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    local rows, keep = {}, {}
+    local rows = {}
     for _, e in ipairs(entries) do
         if q == "" or e.preview:lower():find(q, 1, true) then
             local is_image = e.image and true or false
+            local thumb = thumbs[e.id]
             rows[#rows + 1] = {
                 id = e.id,
                 title = is_image and "Изображение"
@@ -31,10 +36,10 @@ local function filter()
                 is_image = is_image,
                 is_binary = e.binary and true or false,
                 glyph = is_image and "▧" or (e.binary and "◆" or "T"),
-                glyph_show = not is_image,
-                thumb = "",
+                --  a picture shows its glyph only until its preview is there
+                glyph_show = not (is_image and thumb ~= nil),
+                thumb = thumb or "",
             }
-            keep[#rows] = e
             if #rows >= 50 then break end
         end
     end
@@ -42,6 +47,7 @@ local function filter()
     view = rows
     fact.sel = 0
     text.count_text = count_text(#entries)
+    previews()
 end
 
 -- ── reading the history ──────────────────────────────────────────
@@ -66,18 +72,30 @@ local function refresh()
     end)
 end
 
---  A preview for every picture, as it is asked for.
-local function previews()
-    for i, row in ipairs(view) do
-        if row.is_image and row.thumb == "" then
-            local mine = row
-            run("sway-clipboard-preview", { tostring(row.id) }, function(out)
+--  A preview for every picture on show. Each is made once (the helper caches
+--  the file too) and kept by id, so typing in the search does not lose them,
+--  and they no longer depend on `cliphist list` finishing within a timer.
+previews = function()
+    for _, row in ipairs(view) do
+        local id = row.id
+        if row.is_image and not thumbs[id] and not asked[id] then
+            asked[id] = true
+            run("sway-clipboard-preview", { tostring(id) }, function(out, code)
+                asked[id] = nil
+                if code ~= nil and code ~= 0 then return end
                 local path = (out or ""):gsub("%s+$", ""):gsub("^file://", "")
-                if path ~= "" then
-                    mine.thumb = path
-                    mine.glyph_show = false
-                    model.clips = view
+                if path == "" then return end
+                thumbs[id] = path
+                --  Only the rows still on show are touched.
+                local changed = false
+                for _, r in ipairs(view) do
+                    if r.id == id then
+                        r.thumb = path
+                        r.glyph_show = false
+                        changed = true
+                    end
                 end
+                if changed then model.clips = view end
             end)
         end
     end
@@ -94,25 +112,30 @@ on("pick", function(i)
     fact.open = false
 end)
 
+local armed = 0                   -- which arming the 3 s timer belongs to
+
 on("clear_req", function()
     if not fact.confirm then
         fact.confirm = true
-        after(3000, function() fact.confirm = false end)
+        armed = armed + 1
+        local mine = armed
+        after(3000, function() if armed == mine then fact.confirm = false end end)
         return
     end
     fact.confirm = false
     run("sway-clipboard-clear", {}, function()
-        entries = {}
+        entries, thumbs = {}, {}
         filter()
     end)
 end)
 
---  Opening: the history is read again, and the pictures get their previews.
+--  Opening: the history is read again; the pictures get their previews as
+--  soon as the list is in.
 on("fact:open", function(v)
     if not v then return end
     fact.confirm = false
+    if (text.query or "") ~= "" then text.query = "" end
     refresh()
-    after(120, previews)
     --  The release of Super (after Super+V) must not open the control center.
     pcall(sys.call, "say", "center", "emit suppress")
 end)

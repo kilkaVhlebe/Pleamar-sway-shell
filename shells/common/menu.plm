@@ -2,26 +2,43 @@
 // tomorrow. It expects records with `label`, `separator`, `enabled`,
 // `checked` (-1: not a checkbox · 0: empty · 1: checked) and `children`; and it is
 // told which event to emit on press, which carries the row's position inside.
+// `live: false` makes it look the same but take no press (a menu fading out).
+//
+// A row is 30 tall, a separator 9: whoever sizes the plate counts the same.
 
 import "palette.plm"
 
 //  `strict`: its components only read what they ask for, what they declare and the palette's.
 library Menu strict {
-    component MenuRow(r: record, chosen: event, tone: color = mint, width: number = 220) {
+    component MenuRow(r: record, chosen: event, tone: color = mint, width: number = 220, live: bool = true) {
         size: width, 30 - r.separator * 21
-        prop on = 0 ~quick
-        box hit { from: 0, 0; size: width, 30 - r.separator * 21; corner: 7; color: tone
-                  opacity: on * 20%; cursor: pointer; active: r.enabled and not r.separator }
-        //  A separator's stripe.
-        box { from: 6, 4; size: width - 12, 1; color: ink; opacity: r.separator * 14% }
-        text r.label { at: 12, 15; anchor: left center; size: 13.5; width: width - 50; lines: 1; color: ink
-                       opacity: (1 - r.separator) * (0.45 + r.enabled * 0.55) }
-        //  A checkbox, checked or not; or the «there is more» arrow.
-        ellipse { at: width - 16, 15; radius: 3.5; color: tone; opacity: r.checked > 0.5 }
-        ellipse { at: width - 16, 15; radius: 3.5; stroke: 1.2; color: ink; opacity: if(r.checked > -0.5, 0.5, 0) }
-        text "›" { at: width - 16, 14; anchor: center; size: 16; color: ink; opacity: if(r.children > 0, 0.6, 0) }
-        on enter hit { on: 1 ~quick }
-        on leave hit { on: 0 ~quick }
+
+        //  Under the pointer: the house hover, a touch of the accent's ground
+        //  while pressed. Inset 1 px top and bottom, so two lit rows never touch.
+        box { from: 0, 1; size: width, 28; corner: 7; color: mix(hover, bluesoft, hit.pressed)
+              opacity: (1 - r.separator) * hit.hover * 75% }
+
+        //  A separator's stripe, in the middle of its 9 px.
+        box { from: 8, 4; size: width - 16, 1; color: ink; opacity: r.separator * 9% }
+
+        text r.label { at: 12, 15; anchor: left center; size: 13; width: width - 52; lines: 1; color: ink
+                       opacity: (1 - r.separator) * (0.4 + r.enabled * 0.6) }
+
+        //  A checkbox: an outlined square; filled with the tone and ticked when checked.
+        box { from: width - 26, 8; size: 14, 14; corner: 4; stroke: 1.2; color: soft
+              opacity: (r.checked > -0.5) * (r.checked < 0.5) * 80% }
+        box { from: width - 26, 8; size: 14, 14; corner: 4; color: tone; opacity: r.checked > 0.5 }
+        line { from: width - 22.5, 15.2; to: width - 20.2, 17.6; width: 1.7; color: glint; opacity: r.checked > 0.5 }
+        line { from: width - 20.2, 17.6; to: width - 15.6, 12.4; width: 1.7; color: glint; opacity: r.checked > 0.5 }
+
+        //  «There is more»: a chevron drawn, not a glyph.
+        line { from: width - 21, 11; to: width - 17, 15; width: 1.5; color: soft; opacity: r.children > 0 }
+        line { from: width - 17, 15; to: width - 21, 19; width: 1.5; color: soft; opacity: r.children > 0 }
+
+        //  Declared last, so the press is its own; `.hover` and `.pressed`
+        //  light the plate above.
+        zone box hit { from: 0, 0; size: width, 30 - r.separator * 21; corner: 7; cursor: pointer
+                       active: live and r.enabled and not r.separator }
         on press hit { emit chosen(r.index) }
     }
 }

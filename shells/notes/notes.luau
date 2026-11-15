@@ -4,6 +4,7 @@
 local notes = {}
 local primed = false            -- the first look at the list is not news
 local toast_id = nil            -- which one the toast belongs to
+local toast_gen = 0             -- bumps with every toast: its timer's ticket
 
 local watching = sys.watch("notifications", function(list)
     notes = list or {}
@@ -43,7 +44,15 @@ local watching = sys.watch("notifications", function(list)
         fact.toast_urgent = (top.urgency == "critical" or top.urgency == 2)
         fact.toast_show = text.toast_title ~= ""
         if fact.toast_show then
-            after(5000, function() fact.toast_show = false end)
+            --  Only the latest toast's timer may hide it: one that came 4 s
+            --  ago must not cut the new one short.
+            toast_gen = toast_gen + 1
+            local mine = toast_gen
+            after(fact.toast_urgent and 9000 or 5000, function()
+                if toast_gen == mine then fact.toast_show = false end
+            end)
+            --  The scene runs its time-left bar from this: 1 is the long one.
+            emit("toast_new", fact.toast_urgent and 1 or 0)
         end
     end
 end)
@@ -61,6 +70,13 @@ on("clear", function()
     pcall(sys.call, "notifications.clear")
 end)
 
+on("dismiss_toast", function()
+    toast_gen = toast_gen + 1
+    fact.toast_show = false
+end)
+
 on("fact:open", function(v)
+    --  The panel shows them all: the toast has nothing more to say.
+    if v then toast_gen = toast_gen + 1; fact.toast_show = false end
     pcall(sys.call, "say", "bar", "emit note_open " .. (v and "1" or "0"))
 end)
