@@ -13,7 +13,7 @@
 
 Нужен pleamar **0.7.31 или новее** (RPM; обновляется через `zypper dup`).
 
-Локальный RPM-репозиторий (как на этой машине):
+Локальный RPM-репозиторий:
 
 ```sh
 sudo zypper addrepo /path/to/repo/pleamar pleamar
